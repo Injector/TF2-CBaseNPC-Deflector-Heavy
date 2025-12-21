@@ -52,6 +52,9 @@ methodmap HeavyRobotBot < CBaseCombatCharacter
 			.DefineIntField("m_iNumOfFailedTraces")
 			.DefineFloatField("m_flEyePosHeight")
 
+			.DefineFloatField("m_flFOV")
+			.DefineFloatField("m_flCosHalfFOV")
+
 			.DefineVectorField("m_angCurrentAngles")
 			.DefineVectorField("m_angPriorAngles")
 			.DefineFloatField("m_flHeadSteadyTimer")
@@ -356,6 +359,9 @@ static void SpawnPost(int entIndex)
 
 	INextBot nextBot = ent.MyNextBotPointer();
 
+	//game/shared/tf/tf_gamerules.h - DefaultFOV()
+	CBotVision(nextBot.GetVisionInterface()).SetFieldOfViewEx(75.0);
+
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (IsClientInGame(i) && IsPlayerAlive(i) && nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum"))
@@ -392,7 +398,11 @@ static void UpdateTarget(HeavyRobotBot ent)
 			//There is AI flawn that I don't know how to fix: AI will try to reach and kill threat even if threat is not reachable
 			//Since our threat is close (< 500 hammer units) and because of IsImmediateThreat, nextbot will only target that hiding player, instead of killing another players, if both hiding threat and a reachable threat will shoot our nextbot, nextbot will stand like an idiot
 			if (g_CVar_fair_fight.BoolValue && CTFBotIntention(nextBot.GetIntentionInterface()).IsThreatOnNav(i) || !g_CVar_fair_fight.BoolValue)
-				nextBot.GetVisionInterface().AddKnownEntity(i);
+			{
+				if (g_CVar_use_fov.BoolValue && CBotVision(nextBot.GetVisionInterface()).IsInFieldOfViewTargetEx(i) || !g_CVar_use_fov.BoolValue)
+					nextBot.GetVisionInterface().AddKnownEntity(i);
+			}
+			//IsClientInGame(i) && IsPlayerAlive(i) && nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum") && (g_CVar_fair_fight.BoolValue && CTFBotIntention(nextBot.GetIntentionInterface()).IsThreatOnNav(i) || !g_CVar_fair_fight.BoolValue) && (g_CVar_use_fov.BoolValue && CBotVision(nextBot.GetVisionInterface()).IsInFieldOfViewEx(i) || !g_CVar_use_fov.BoolValue)
 		}
 	}
 
@@ -450,7 +460,13 @@ static void Think(int entIndex)
 		{
 			bot.GetVisionInterface().ForgetEntity(i);
 		}
+		if (IsClientInGame(i) && IsPlayerAlive(i) && CheckCommandAccess(i, "sm_rcon", ADMFLAG_RCON))
+		{
+			//CBotVision(bot.GetVisionInterface()).IsInFieldOfViewTargetEx(i);
+		}
 	}
+
+	//CBotDebug(bot).DebugLookAt();
 }
 
 static void OnTakeDamageAlivePost(int entIndex,

@@ -128,3 +128,24 @@ stock float FloatClamp(float f1, float f2, float f3)
 {
 	return (f1 > f3 ? f3 : (f1 < f2 ? f2 : f1));
 }
+
+stock float LengthSqr(float pos[3])
+{
+	return (pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]);
+}
+
+stock bool PointWithinViewAngle(const float srcPos[3], const float targetPos[3], const float lookDir[3], float cosHalfFOV)
+{
+    float vecDelta[3];
+    SubtractVectors(targetPos, srcPos, vecDelta);
+    float flCosDiff = GetVectorDotProduct(lookDir, vecDelta);
+
+    if (flCosDiff < 0.0)
+        return false;
+
+    float flLen = LengthSqr(vecDelta);
+
+    //PrintCenterTextAll("%.2f > %.2f | %b", flCosDiff * flCosDiff, flLen * cosHalfFOV * cosHalfFOV, (flCosDiff * flCosDiff > flLen * cosHalfFOV * cosHalfFOV));
+
+    return (flCosDiff * flCosDiff > flLen * cosHalfFOV * cosHalfFOV);
+}

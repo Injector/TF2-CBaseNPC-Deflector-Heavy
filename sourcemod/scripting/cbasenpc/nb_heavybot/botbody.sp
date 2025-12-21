@@ -1,6 +1,6 @@
-//#define DEBUG_BOT_BODY 1
+//#define DEBUG_BOT_BODY
 
-#define BOT_BODY_VERSION "1.0"
+#define BOT_BODY_VERSION "1.1"
 
 //Define these in BeginDataMapDesc()
 /*
@@ -278,6 +278,9 @@ methodmap CBotBody < IBody
         angView[0] += AngleNormalize(vecDir[0] - angView[0]) * aimSpeed;
         angView[1] += AngleNormalize(vecDir[1] - angView[1]) * aimSpeed;
 
+        angView[0] = AngleNormalize(angView[0]);
+        angView[1] = AngleNormalize(angView[1]);
+
         CBaseEntity(bot.GetEntity()).SetPropVector(Prop_Data, "m_angCurrentAngles", angView);
     }
 
@@ -511,7 +514,7 @@ methodmap CBotBody < IBody
 
         //PrintCenterTextAll("%.5f %.1f %.1f %.1f", GetHeadAimTrackingInterval2(iSkill), vecRes[0], vecRes[1], vecRes[2]);
 
-        Handle hTrace = TR_TraceRayFilterEx(vecEyePos, vecRes, (MASK_SOLID|CONTENTS_HITBOX|CONTENTS_WINDOW), RayType_Infinite, Filter_WorldOnly, bot.GetEntity());
+        Handle hTrace = TR_TraceRayFilterEx(vecEyePos, vecRes, (MASK_SOLID|CONTENTS_HITBOX), RayType_Infinite, Filter_WorldOnly, bot.GetEntity());
 
         if (TR_GetFraction(hTrace) < 1.0)
         {
@@ -539,6 +542,20 @@ methodmap CBotBody < IBody
         iColour2[3] = 255;
 
         TE_SetupBeamPoints(vecEyePos, vecEndPos, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
+        TE_SendToAll();
+
+        float vecForward[3], vecDir[3];
+        GetAngleVectors(vecRes, vecForward, NULL_VECTOR, NULL_VECTOR);
+
+        vecDir[0] = vecEyePos[0] + (100.0 * vecForward[0]);
+        vecDir[1] = vecEyePos[1] + (100.0 * vecForward[1]);
+        vecDir[2] = vecEyePos[2] + (100.0 * vecForward[2]);
+
+        iColour2[0] = 0;
+        iColour2[1] = 0;
+        iColour2[2] = 255;
+
+        TE_SetupBeamPoints(vecEyePos, vecDir, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
         TE_SendToAll();
 #endif
 

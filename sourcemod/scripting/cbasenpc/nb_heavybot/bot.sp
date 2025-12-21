@@ -5,11 +5,23 @@
 
 #define BOT_VERSION "1.0"
 
+//For FAKECLIENT_TEAM_MODE_ALL_TEAMS, please use HookEvent("player_team", ...) and return Plugin_Handled when client == GetClientOfUserId(g_iFakeClientUserId) to hide change client team notification in kill feed and chat
+#define FAKECLIENT_TEAM_MODE_ONLY_WHITE 1
+#define FAKECLIENT_TEAM_MODE_ALL_TEAMS 2
+
+
 float g_flWeaponFired[MAXPLAYERS + 1];
 float g_flSentryGunFired[2048 + 1];
 
 char g_szFakeClientName[64];
 int g_iFakeClientUserId;
+
+int g_iAmountOfTriesToChangeTeam;
+float g_flLastChangedTime;
+
+int g_iFakeClientTeamMode;
+
+//bool g_bDebugLookAt;
 
 stock void ReqFrameCreateEvent(DataPack pack)
 {
@@ -29,6 +41,16 @@ stock void ReqFrameCreateEvent(DataPack pack)
     newEvent.SetString("weapon", szWeapon);
     newEvent.SetInt("death_flags", iDeathFlags);
     newEvent.Fire();
+}
+
+stock void ReqFrameChangeTeam(int userid)
+{
+    int client = GetClientOfUserId(userid);
+
+    if (!client)
+        return;
+
+    ChangeClientTeam(client, 0);
 }
 
 public Action FakeClient_OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damagecustom)
@@ -55,13 +77,19 @@ methodmap CBot
 				g_iFakeClientUserId = GetClientUserId(iBot);
 				SDKHook(iBot, SDKHook_OnTakeDamage, FakeClient_OnTakeDamage);
             }
+            g_flLastChangedTime = 0.0;
+            g_iAmountOfTriesToChangeTeam = 0;
 		}
     }
 
     public static void RemoveFakeClient()
     {
         if (GetClientOfUserId(g_iFakeClientUserId) > 0)
+        {
             KickClient(GetClientOfUserId(g_iFakeClientUserId));
+            g_flLastChangedTime = 0.0;
+            g_iAmountOfTriesToChangeTeam = 0;
+        }
     }
 
     public static void ClearFakeClientLoadout(int client)
@@ -86,6 +114,44 @@ methodmap CBot
                 }
                 RemovePlayerItem(client, iWeapon);
                 AcceptEntityInput(iWeapon, "Kill");
+            }
+        }
+    }
+
+    //If a fake client changed his team (usually unassigned) to a different one and g_iFakeClientTeamMode == FAKECLIENT_TEAM_MODE_ONLY_WHITE, switch back to unassigned team
+    public static void EventPlayerTeam(int client, int team)
+    {
+        if (GetClientOfUserId(g_iFakeClientUserId) != client)
+            return;
+
+        if (g_iFakeClientTeamMode != FAKECLIENT_TEAM_MODE_ONLY_WHITE)
+            return;
+
+        int iCurrentTeam = GetClientTeam(client);
+        int iNewTeam = team;
+
+        //Reset num of tries since we joined unassigned team back
+        if (iNewTeam < 2)
+        {
+            g_iAmountOfTriesToChangeTeam = 0;
+        }
+
+        //We are in unassigned team and some plugin tries to change our team
+        if (iCurrentTeam < 2)
+        {
+            if (team > 1)
+            {
+                float flTime = GetGameTime() - g_flLastChangedTime;
+                if (g_iAmountOfTriesToChangeTeam != 0)
+                {
+                    //Added check to make sure to prevent infinite loop somehow (by third plugins)
+                    if (flTime == 0.0 || flTime > 0.0 && flTime <= 0.2)
+                        return;
+                }
+
+                RequestFrame(ReqFrameChangeTeam, g_iFakeClientUserId);
+                g_iAmountOfTriesToChangeTeam++;
+                g_flLastChangedTime = GetGameTime();
             }
         }
     }
@@ -155,6 +221,14 @@ methodmap CBot
                             SetClientInfo(iTarget, "name", g_szFakeClientName);
                         }
 
+                        if (g_iFakeClientTeamMode == FAKECLIENT_TEAM_MODE_ALL_TEAMS && GetEntProp(iEnt, Prop_Send, "m_iTeamNum") <= 3)
+                        {
+                            //Switch our class to unassigned, so we don't receive 'bid farewell, cruel world!' and prevent us from spawning to avoid break custom gamemodes which relies on alive players?
+                            SetEntProp(iTarget, Prop_Send, "m_iDesiredPlayerClass", 0);
+                            SetEntProp(iTarget, Prop_Send, "m_iClass", 0);
+                            ChangeClientTeam(iTarget, GetEntProp(iEnt, Prop_Send, "m_iTeamNum"));
+                        }
+
                         event.SetString("assister_fallback", "");
                         event.SetInt("attacker", GetClientUserId(iTarget));
                         event.SetString("weapon", weapon);
@@ -164,5 +238,37 @@ methodmap CBot
                 }
             }
         }
+    }
+}
+
+methodmap CBotDebug < INextBot
+{
+    public CBotDebug(INextBot bot)
+    {
+        return view_as<CBotDebug>(bot);
+    }
+
+    public void DebugLookAt()
+    {
+        float vecEyePos[3], angEyes[3];
+        CBaseEntity ent = CBaseEntity(this.GetEntity());
+        ent.GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
+        CBotBody(this.GetBodyInterface()).GetEyePositionEx(vecEyePos);
+
+        float vecForward[3], vecDir[3];
+        GetAngleVectors(angEyes, vecForward, NULL_VECTOR, NULL_VECTOR);
+
+        vecDir[0] = vecEyePos[0] + (500.0 * vecForward[0]);
+        vecDir[1] = vecEyePos[1] + (500.0 * vecForward[1]);
+        vecDir[2] = vecEyePos[2] + (500.0 * vecForward[2]);
+
+        int iColour2[4];
+        iColour2[0] = 0;
+        iColour2[1] = 0;
+        iColour2[2] = 255;
+        iColour2[3] = 255;
+
+        TE_SetupBeamPoints(vecEyePos, vecDir, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
+        TE_SendToAll();
     }
 }

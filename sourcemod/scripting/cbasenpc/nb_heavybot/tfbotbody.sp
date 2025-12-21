@@ -6,6 +6,8 @@
 
 #define DEBBUGING 0
 
+#define TFBOT_BODY_VERSION "1.1"
+
 methodmap CTFBotBody < IBody
 {
     public CTFBotBody(IBody body)
@@ -201,7 +203,7 @@ methodmap CTFBotBody < IBody
         ent.GetPropVector(Prop_Data, "m_vecLookAtPos", vecLookAtPos);
 
         float vecEyePos[3];
-        bot.GetBodyInterface().GetEyePosition(vecEyePos);
+        CBotBody(bot.GetBodyInterface()).GetEyePositionEx(vecEyePos);
 
         float vecTo[3];
         SubtractVectors(vecLookAtPos, vecEyePos, vecTo);
@@ -211,12 +213,12 @@ methodmap CTFBotBody < IBody
         GetVectorAngles(vecTo, angDesiredAngles);
 
         #if DEBBUGING
-            float vecTemp4[3];
-            bot.GetBodyInterface().GetEyePosition(vecTemp4);
-            float vecTemp3[3];
-            vecTemp3[0] = vecTemp4[0] + (100.0 * vecForward[0]);
-            vecTemp3[1] = vecTemp4[1] + (100.0 * vecForward[1]);
-            vecTemp3[2] = vecTemp4[2] + (100.0 * vecForward[2]);
+            float vecDbgEyePos[3];
+            CBotBody(bot.GetBodyInterface()).GetEyePositionEx(vecDbgEyePos);
+            float vecDbgDir[3];
+            vecDbgDir[0] = vecDbgEyePos[0] + (100.0 * vecForward[0]);
+            vecDbgDir[1] = vecDbgEyePos[1] + (100.0 * vecForward[1]);
+            vecDbgDir[2] = vecDbgEyePos[2] + (100.0 * vecForward[2]);
 
             int iColour2[4];
             iColour2[0] = 255;
@@ -224,7 +226,7 @@ methodmap CTFBotBody < IBody
             iColour2[2] = 0;
             iColour2[3] = 255;
 
-            TE_SetupBeamPoints(vecTemp4, vecTemp3, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
+            TE_SetupBeamPoints(vecDbgEyePos, vecDbgDir, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
             TE_SendToAll();
 
             float flThickness = bIsSteady ? 2.0 : 3.0;
@@ -232,7 +234,7 @@ methodmap CTFBotBody < IBody
             iColour2[1] = iSubject != -1 ? 255 : 0;
             iColour2[2] = 255;
 
-            TE_SetupBeamPoints(vecTemp4, vecLookAtPos, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, flThickness, 1, 0.0, iColour2, 10);
+            TE_SetupBeamPoints(vecDbgEyePos, vecLookAtPos, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, flThickness, 1, 0.0, iColour2, 10);
             TE_SendToAll();
         #endif
 

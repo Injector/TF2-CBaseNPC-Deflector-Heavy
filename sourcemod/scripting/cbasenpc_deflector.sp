@@ -5,7 +5,7 @@
 #include <tf2_stocks>
 #include <tf2>
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 
 public Plugin myinfo =
 {
@@ -21,7 +21,7 @@ public Plugin myinfo =
 #define BASE_MODEL_SCALE "1.75"
 #define BASE_MODEL_SCALE_F 1.75
 #define BASE_HEALTH 5000
-#define BASE_SPEED 150.0
+#define BASE_SPEED 230.0
 
 #define NEXTBOT_CUSTOM_CLASS_NAME "nb_heavybot"
 
@@ -43,6 +43,8 @@ public Plugin myinfo =
 ConVar g_CVar_aim;
 ConVar g_CVar_killfeed;
 ConVar g_CVar_fair_fight;
+ConVar g_CVar_use_fov;
+ConVar g_CVar_team_mode;
 
 char g_szGibs[][] =
 {
@@ -88,6 +90,8 @@ char g_szDieSounds[][] =
 #include "cbasenpc/nb_heavybot/tfbotbody.sp"
 
 #include "cbasenpc/nb_heavybot/tfbotintention.sp"
+
+#include "cbasenpc/nb_heavybot/botvision.sp"
 
 #include "cbasenpc/nb_heavybot.sp"
 
@@ -421,12 +425,21 @@ public void OnPluginStart()
     g_CVar_aim = CreateConVar("sm_nextbot_deflector_aim", "1", "0 - Use TFBot aim system, BUGGED! See plugin page for info. 1 - Use same system as TFBot, but a little different and fixed");
     g_CVar_killfeed = CreateConVar("sm_nextbot_deflector_killfeed", "1", "Should the Deflector's kills/deaths be listed in the killfeed?");
     g_CVar_fair_fight = CreateConVar("sm_nextbot_deflector_fair_fight", "0", "If set, AI will ignore players who are in places where there is no navmesh to prevent AI abuse, and these players cant damage the Deflector nextbot, more info on a plugin page");
+    g_CVar_use_fov = CreateConVar("sm_nextbot_deflector_use_fov", "0", "If set, NextBot will use FOV system to detect his threats");
+    g_CVar_team_mode = CreateConVar("sm_nextbot_deflector_team_mode", "0", "For sm_nextbot_deflector_killfeed, 0 - fake client spawned in unassigned team and can be switched to another team; 1 - fake client always will be in unassigned team; 2 - fake client will change team depends on nextbot team");
+
+    HookConVarChange(g_CVar_team_mode, OnCVarChanged_team_mode);
+
+    char szValue[8];
+    g_CVar_team_mode.GetString(szValue, sizeof(szValue));
+    OnCVarChanged_team_mode(g_CVar_team_mode, szValue, szValue);
 
     RegAdminCmd("sm_deflectorbot", Cmd_Test, ADMFLAG_RCON, "Spawn a nextbot deflector heavy");
 
     HookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
     HookEvent("post_inventory_application", Event_PlayerSpawn);
     HookEvent("npc_hurt", Event_NpcHurt);
+    HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
 
     g_szFakeClientName = "Giant Deflector Heavy";
 }
@@ -533,6 +546,11 @@ public void OnPluginEnd()
 	CBot.RemoveFakeClient();
 }
 
+public void OnCVarChanged_team_mode(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+    g_iFakeClientTeamMode = StringToInt(newValue);
+}
+
 public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
     if (!g_CVar_killfeed.BoolValue)
@@ -563,6 +581,7 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
         //To avoid infinite loop (we moving to spectator again and some plugin move this client back to red/blue)
         //We will grant him a god mode and invisiblity
         //This client is ignored by a nextbot just in case (spawn location on the open map etc)
+        //UPD: changed my mind, added cooldown check in bot.sp
         CBot.ClearFakeClientLoadout(client);
     }
 }
@@ -587,6 +606,21 @@ public void Event_NpcHurt(Event event, const char[] name, bool dontBroadcast)
             CBot.EventNPCHurt(event);
         }
     }
+}
+
+public Action Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast)
+{
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    int iTeam = event.GetInt("team");
+    bool bDisconnect = event.GetBool("disconnect");
+    if (bDisconnect)
+        return Plugin_Continue;
+    if (client == GetClientOfUserId(g_iFakeClientUserId))
+    {
+        CBot.EventPlayerTeam(client, iTeam);
+        return Plugin_Handled;
+    }
+    return Plugin_Continue;
 }
 
 //Using this to detect player firing his weapon for soldier's AI IsImmediate
