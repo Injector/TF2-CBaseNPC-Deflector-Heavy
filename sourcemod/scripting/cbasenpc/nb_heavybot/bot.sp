@@ -3,6 +3,11 @@
 #define BOT_SKILL_HARD	2
 #define BOT_SKILL_EXPERT 3
 
+#define LOOKAT_BORING 0
+#define LOOKAT_INTERESTING 1
+#define LOOKAT_IMPORTANT 2
+#define LOOKAT_CRITICAL 3
+
 #define BOT_VERSION "1.0"
 
 //For FAKECLIENT_TEAM_MODE_ALL_TEAMS, please use HookEvent("player_team", ...) and return Plugin_Handled when client == GetClientOfUserId(g_iFakeClientUserId) to hide change client team notification in kill feed and chat

@@ -7,12 +7,14 @@ methodmap HeavyRobotBotMainAction < NextBotAction
 		ActionFactory = new NextBotActionFactory("HeavyRobotMainAction");
 		ActionFactory.BeginDataMapDesc()
 			.DefineIntField("m_PathFollower")
+			.DefineIntField("m_PathFollower2")
 		.EndDataMapDesc();
 		ActionFactory.SetCallback(NextBotActionCallbackType_OnStart, OnStart);
 		ActionFactory.SetCallback(NextBotActionCallbackType_Update, Update);
 		ActionFactory.SetCallback(NextBotActionCallbackType_OnEnd, OnEnd);
 		ActionFactory.SetEventCallback(EventResponderType_OnInjured, OnInjured);
 		ActionFactory.SetEventCallback(EventResponderType_OnKilled, OnKilled);
+		ActionFactory.SetEventCallback(EventResponderType_OnContact, OnContact);
 		ActionFactory.SetQueryCallback(ContextualQueryType_SelectMoreDangerousThreat, SelectMoreDangerousThreat);
 	}
 
@@ -38,11 +40,25 @@ methodmap HeavyRobotBotMainAction < NextBotAction
 			this.SetData("m_PathFollower", value);
 		}
 	}
+
+	property PathFollower m_PathFollower2
+	{
+		public get()
+		{
+			return view_as<PathFollower>(this.GetData("m_PathFollower2"));
+		}
+
+		public set(PathFollower value)
+		{
+			this.SetData("m_PathFollower2", value);
+		}
+	}
 }
 
 static void OnStart(HeavyRobotBotMainAction action, HeavyRobotBot actor, NextBotAction prevAction)
 {
 	action.m_PathFollower = ChasePath(LEAD_SUBJECT, _, Path_FilterIgnoreActors, Path_FilterOnlyActors);
+	action.m_PathFollower2 = PathFollower(_, Path_FilterIgnoreActors, Path_FilterOnlyActors);
 }
 
 static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float interval)
@@ -68,18 +84,18 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 	{
 		hTarget = CBaseEntity(hKnownEntity.GetEntity());
 		iThreatEnt = hKnownEntity.GetEntity();
-		CBotBody(bot.GetBodyInterface()).AimHeadTowards(hKnownEntity.GetEntity());
+		//CBotBody(bot.GetBodyInterface()).AimHeadTowards(hKnownEntity.GetEntity());
 	}
 	else
 	{
-		CBotBody(bot.GetBodyInterface()).AimHeadTowards(-1);
+		//CBotBody(bot.GetBodyInterface()).AimHeadTowards(-1);
 	}
 
 	if (actor.GetPropEnt(Prop_Data, "m_hForcedTarget") > 0)
 	{
 		iThreatEnt = actor.GetPropEnt(Prop_Data, "m_hForcedTarget");
 		hTarget = CBaseEntity(actor.GetPropEnt(Prop_Data, "m_hForcedTarget"));
-		CBotBody(bot.GetBodyInterface()).AimHeadTowards(iThreatEnt);
+		//CBotBody(bot.GetBodyInterface()).AimHeadTowards(iThreatEnt);
 	}
 
 	if (hTarget.IsValid())
@@ -107,17 +123,36 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 
 		if (g_CVar_aim.IntValue == 0)
 		{
-			CTFBotBody(bot.GetBodyInterface()).AimHeadTowards(iThreatEnt, 3, 1.0, "Aiming at a visible threat");
+			CTFBotBody(bot.GetBodyInterface()).AimHeadTowards(iThreatEnt, LOOKAT_CRITICAL, 1.0, "Aiming at a visible threat");
+		}
+		else if (g_CVar_aim.IntValue == 1)
+		{
+			CBotBody(bot.GetBodyInterface()).AimHeadTowards(iThreatEnt, LOOKAT_CRITICAL, 1.0);
 		}
 
 		if (bShouldMoveToTarget)
 		{
-			ChasePath path = action.GetData("m_PathFollower");
-			if (path)
+			//PathFollower works better than ChasePath..?
+			//For some reason, nextbot could stuck if we use ChasePath, even if there is navmesh and no obstacles and threat is on a reachable navmesh area too
+			//Need more testing...
+			PathFollower path2 = action.GetData("m_PathFollower2");
+			if (path2)
 			{
+				if (GetGameTime() > actor.m_flPathTime)
+				{
+					path2.ComputeToPos(bot, vecTargetPos);
+					actor.m_flPathTime = GetGameTime() + 0.2;
+				}
+				path2.Update(bot);
 				loco.Run();
-				path.Update(bot, hTarget.index);
 			}
+
+			//ChasePath path = action.GetData("m_PathFollower");
+			//if (path)
+			//{
+			//	loco.Run();
+			//	path.Update(bot, hTarget.index);
+			//}
 		}
 		else
 		{
@@ -125,6 +160,8 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 			//{
 			//}
 		}
+
+		//PrintCenterTextAll("bSeeTarget %b bCanShoot %b IsHeadAimingOnTarget %b", bSeeTarget, bCanShoot, CBotBody(bot.GetBodyInterface()).IsHeadAimingOnTarget());
 
 
 		if (bSeeTarget && bCanShoot)
@@ -199,7 +236,7 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 			if (GetGameTime() > actor.m_flNextWalkTime)
 			{
 				EmitSoundToAll(g_szFootstepSounds[GetRandomInt(0, sizeof(g_szFootstepSounds) - 1)], actor.index, SNDCHAN_AUTO, 95, _, 1.0);
-				actor.m_flNextWalkTime = GetGameTime() + 0.5;
+				actor.m_flNextWalkTime = GetGameTime() + FOOTSTEPS_COOLDOWN;
 			}
 		}
 	}
@@ -214,6 +251,12 @@ static void OnEnd(HeavyRobotBotMainAction action, HeavyRobotBot actor, NextBotAc
 	{
 		actor.MyNextBotPointer().NotifyPathDestruction(path);
 		path.Destroy();
+	}
+	PathFollower path2 = action.m_PathFollower2;
+	if (path2)
+	{
+		actor.MyNextBotPointer().NotifyPathDestruction(path2);
+		path2.Destroy();
 	}
 }
 
@@ -241,6 +284,31 @@ static int OnKilled(HeavyRobotBotMainAction action,
 	const float damagePosition[3], int damageCustom)
 {
 	return action.TryChangeTo(HeavyRobotBotDeathAction(damagetype), RESULT_CRITICAL);
+}
+
+static void OnContact(HeavyRobotBotMainAction action, int actor, int other, Address result)
+{
+	if (other > MaxClients)
+	{
+		char szClassName[64];
+		GetEntityClassname(other, szClassName, sizeof(szClassName));
+		if (StrEqual(szClassName, "obj_teleporter") || StrEqual(szClassName, "obj_dispenser") || StrEqual(szClassName, "obj_sentrygun") && GetEntProp(other, Prop_Send, "m_bMiniBuilding") == 1)
+		{
+			if (GetEntProp(other, Prop_Send, "m_iTeamNum") != GetEntProp(actor, Prop_Send, "m_iTeamNum"))
+			{
+				int iHealth = GetEntProp(other, Prop_Send, "m_iHealth");
+				int iMaxHealth = GetEntProp(other, Prop_Data, "m_iMaxHealth");
+
+				if (iHealth > iMaxHealth)
+					iMaxHealth = iHealth;
+
+				iMaxHealth *= 2;
+
+				SetVariantInt(iMaxHealth);
+				AcceptEntityInput(other, "RemoveHealth");
+			}
+		}
+	}
 }
 
 //CTFBotMainAction::SelectMoreDangerousThreat

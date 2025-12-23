@@ -40,6 +40,7 @@ methodmap HeavyRobotBot < CBaseCombatCharacter
             .DefineIntField("m_moveXPoseParameter")
             .DefineIntField("m_moveYPoseParameter")
             .DefineEntityField("m_hForcedTarget")
+            .DefineFloatField("m_flPathTime")
 
 			.DefineIntField("m_iSkill")
             .DefineEntityField("m_hTarget")
@@ -236,6 +237,19 @@ methodmap HeavyRobotBot < CBaseCombatCharacter
 			this.SetPropFloat(Prop_Data, "m_flWeaponIdleTime", val);
 		}
 	}
+
+	property float m_flPathTime
+	{
+		public get()
+		{
+			return this.GetPropFloat(Prop_Data, "m_flPathTime");
+		}
+
+		public set(float val)
+		{
+			this.SetPropFloat(Prop_Data, "m_flPathTime", val);
+		}
+	}
 }
 
 static void InitBehaviours()
@@ -366,7 +380,8 @@ static void SpawnPost(int entIndex)
 	{
 		if (IsClientInGame(i) && IsPlayerAlive(i) && nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum"))
 		{
-			nextBot.GetVisionInterface().AddKnownEntity(i);
+			if (!g_CVar_spy_cloak_visible.BoolValue && !TF2_IsPlayerInCondition(i, TFCond_Cloaked) || g_CVar_spy_cloak_visible.BoolValue)
+				nextBot.GetVisionInterface().AddKnownEntity(i);
 		}
 	}
 
@@ -400,17 +415,46 @@ static void UpdateTarget(HeavyRobotBot ent)
 			if (g_CVar_fair_fight.BoolValue && CTFBotIntention(nextBot.GetIntentionInterface()).IsThreatOnNav(i) || !g_CVar_fair_fight.BoolValue)
 			{
 				if (g_CVar_use_fov.BoolValue && CBotVision(nextBot.GetVisionInterface()).IsInFieldOfViewTargetEx(i) || !g_CVar_use_fov.BoolValue)
-					nextBot.GetVisionInterface().AddKnownEntity(i);
+					if (!g_CVar_spy_cloak_visible.BoolValue && !TF2_IsPlayerInCondition(i, TFCond_Cloaked) || g_CVar_spy_cloak_visible.BoolValue)
+						nextBot.GetVisionInterface().AddKnownEntity(i);
 			}
 			//IsClientInGame(i) && IsPlayerAlive(i) && nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum") && (g_CVar_fair_fight.BoolValue && CTFBotIntention(nextBot.GetIntentionInterface()).IsThreatOnNav(i) || !g_CVar_fair_fight.BoolValue) && (g_CVar_use_fov.BoolValue && CBotVision(nextBot.GetVisionInterface()).IsInFieldOfViewEx(i) || !g_CVar_use_fov.BoolValue)
 		}
 	}
 
+	//TODO: Replace with * to include the other nextbots as enemies
 	int iEnt = -1;
 	while ((iEnt = FindEntityByClassname(iEnt, "obj_sentrygun")) != INVALID_ENT_REFERENCE)
 	{
 		if (nextBot.GetVisionInterface().IsAbleToSeeTarget(iEnt, DISREGARD_FOV))
 			nextBot.GetVisionInterface().AddKnownEntity(iEnt);
+	}
+
+	//OnContact doens't work for some reason...
+	iEnt = -1;
+	char szClassName[64];
+	float vecMyPos[3], vecEntPos[3];
+	ent.GetPropVector(Prop_Send, "m_vecOrigin", vecMyPos);
+	while ((iEnt = FindEntityByClassname(iEnt, "obj_*")) != INVALID_ENT_REFERENCE)
+	{
+		GetEntityClassname(iEnt, szClassName, sizeof(szClassName));
+		if ((StrEqual(szClassName, "obj_teleporter") || StrEqual(szClassName, "obj_dispenser") || StrEqual(szClassName, "obj_sentrygun") && GetEntProp(iEnt, Prop_Send, "m_bMiniBuilding") == 1) && ent.GetProp(Prop_Send, "m_iTeamNum") != GetEntProp(iEnt, Prop_Send, "m_iTeamNum"))
+		{
+			GetEntPropVector(iEnt, Prop_Send, "m_vecOrigin", vecEntPos);
+			if (GetVectorDistance(vecMyPos, vecEntPos) <= 150)
+			{
+				int iHealth = GetEntProp(iEnt, Prop_Send, "m_iHealth");
+				int iMaxHealth = GetEntProp(iEnt, Prop_Data, "m_iMaxHealth");
+
+				if (iHealth > iMaxHealth)
+					iMaxHealth = iHealth;
+
+				iMaxHealth *= 2;
+
+				SetVariantInt(iMaxHealth);
+				AcceptEntityInput(iEnt, "RemoveHealth");
+			}
+		}
 	}
 
 	//For some reason, it automatictly add some known entities that we don't want to know (friendly players)
@@ -459,10 +503,6 @@ static void Think(int entIndex)
 		if (IsClientInGame(i) && IsPlayerAlive(i) && g_CVar_fair_fight.BoolValue && !CTFBotIntention(bot.GetIntentionInterface()).IsThreatOnNav(i))
 		{
 			bot.GetVisionInterface().ForgetEntity(i);
-		}
-		if (IsClientInGame(i) && IsPlayerAlive(i) && CheckCommandAccess(i, "sm_rcon", ADMFLAG_RCON))
-		{
-			//CBotVision(bot.GetVisionInterface()).IsInFieldOfViewTargetEx(i);
 		}
 	}
 
@@ -549,6 +589,13 @@ static Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &dam
         //No friendly fire
         if (StrEqual(szClassName, "nb_heavybot"))
             return Plugin_Stop;
+
+		//Projectile still hooks OnTakeDamage, even in same teams
+		if (GetEntProp(attacker, Prop_Send, "m_iTeamNum") == GetEntProp(victim, Prop_Send, "m_iTeamNum"))
+			return Plugin_Stop;
+
+		if (CBaseEntity(victim).MyNextBotPointer().GetVisionInterface().GetKnown(attacker) == NULL_KNOWN_ENTITY)
+			CBaseEntity(victim).MyNextBotPointer().GetVisionInterface().AddKnownEntity(attacker);
 	}
 	return Plugin_Continue;
 }

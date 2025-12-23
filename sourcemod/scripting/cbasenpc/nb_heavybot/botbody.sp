@@ -1,6 +1,6 @@
 //#define DEBUG_BOT_BODY
 
-#define BOT_BODY_VERSION "1.1"
+#define BOT_BODY_VERSION "1.2"
 
 //Define these in BeginDataMapDesc()
 /*
@@ -44,11 +44,33 @@ methodmap CBotBody < IBody
         return 1.0;
     }
 
-    public void AimHeadTowards(int target)
+    public void AimHeadTowards(int target, int priority, float duration)
     {
         INextBot bot = this.GetBot();
+        CBaseEntity ent = CBaseEntity(bot.GetEntity());
 
-        CBaseEntity(bot.GetEntity()).SetPropEnt(Prop_Data, "m_hTarget", target);
+        if (duration <= 0.0)
+            duration = 0.1;
+
+        if (ent.GetProp(Prop_Data, "m_iLookAtPriority") > priority && ent.GetPropFloat(Prop_Data, "m_flLookAtExpireTimer") > GetGameTime())
+        {
+            return;
+        }
+
+        ent.SetPropEnt(Prop_Data, "m_hTarget", target);
+
+        ent.SetPropFloat(Prop_Data, "m_flLookAtExpireTimer", GetGameTime() + duration);
+
+        ent.SetProp(Prop_Data, "m_iLookAtPriority", priority);
+        ent.SetPropFloat(Prop_Data, "m_flLookAtDurationTimer", GetGameTime());
+        ent.SetProp(Prop_Data, "m_bHasBeenSightedIn", false);
+    }
+
+    public bool IsHeadAimingOnTarget()
+    {
+        INextBot bot = this.GetBot();
+        CBaseEntity ent = CBaseEntity(bot.GetEntity());
+        return ent.HasProp(Prop_Data, "m_bIsSightedIn") && ent.GetProp(Prop_Data, "m_bIsSightedIn");
     }
 
     //BUG: Sometimes it fails and return -1, despite the threat and bot see each other perfectly
@@ -300,6 +322,7 @@ methodmap CBotBody < IBody
         anim.SetPoseParameter(anim.LookupPoseParameter("move_yaw"), flDiff);
     }
 
+    //TODO: Replace m_vecOrigin with eye pos
     public void UpdateBodyAimPitchYaw()
     {
         INextBot bot = this.GetBot();
@@ -437,57 +460,141 @@ methodmap CBotBody < IBody
 	public void UpdateBodyPitchYaw()
 	{
         INextBot bot = this.GetBot();
-        int iTarget = CBaseEntity(bot.GetEntity()).GetPropEnt(Prop_Data, "m_hLookAtSubject");
-
-        if (iTarget <= 0)
-            iTarget = CBaseEntity(bot.GetEntity()).GetPropEnt(Prop_Data, "m_hTarget");
-
-        if (iTarget <= 0)
-        {
-            CBaseCombatCharacter anim = CBaseCombatCharacter(bot.GetEntity());
-
-            int iPitch = anim.LookupPoseParameter("body_pitch");
-            int iYaw = anim.LookupPoseParameter("body_yaw");
-
-            anim.SetPoseParameter(iPitch, 0.0);
-            anim.SetPoseParameter(iYaw, 0.0);
-            return;
-        }
 
         CBaseCombatCharacter anim = CBaseCombatCharacter(bot.GetEntity());
 
         int iPitch = anim.LookupPoseParameter("body_pitch");
-        //int iYaw = anim.LookupPoseParameter("body_yaw");
+        int iYaw = anim.LookupPoseParameter("body_yaw");
 
-        float vecDir[3], angDir[3], vecPos[3], vecTargetPos[3], angBot[3];
-        anim.WorldSpaceCenter(vecPos);
-        CBaseAnimating(iTarget).WorldSpaceCenter(vecTargetPos);
-        GetEntPropVector(bot.GetEntity(), Prop_Data, "m_angAbsRotation", angBot);
+        float vecDir[3], angDir[3], vecEyePos[3], vecTargetPos[3], angBot[3], angEyes[3];
 
-        SubtractVectors(vecPos, vecTargetPos, vecDir);
+        this.GetEyePositionEx(vecEyePos);
+        anim.GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
+        anim.GetPropVector(Prop_Data, "m_angAbsRotation", angBot);
+
+        int iTarget = anim.GetPropEnt(Prop_Data, "m_hLookAtSubject");
+        if (iTarget <= 0)
+            iTarget = anim.GetPropEnt(Prop_Data, "m_hTarget");
+
+        if (iTarget > 0)
+        {
+            Handle hTrace = TR_TraceRayFilterEx(vecEyePos, angEyes, (MASK_SOLID|CONTENTS_HITBOX), RayType_Infinite, Filter_WorldOnly, bot.GetEntity());
+
+            if (TR_GetFraction(hTrace) < 1.0)
+            {
+                if (TR_GetEntityIndex(hTrace) == -1)
+                {
+                    delete hTrace;
+
+                    anim.SetPoseParameter(iPitch, 0.0);
+                    anim.SetPoseParameter(iYaw, 0.0);
+
+                    return;
+                }
+            }
+
+            TR_GetEndPosition(vecTargetPos, hTrace);
+
+            delete hTrace;
+        }
+        else
+        {
+            float vecForward[3];
+            GetAngleVectors(angEyes, vecForward, NULL_VECTOR, NULL_VECTOR);
+            vecTargetPos[0] = vecEyePos[0] + vecForward[0] * 100.0;
+            vecTargetPos[1] = vecEyePos[1] + vecForward[1] * 100.0;
+            vecTargetPos[2] = vecEyePos[2] + vecForward[2] * 100.0;
+        }
+
+        SubtractVectors(vecEyePos, vecTargetPos, vecDir);
         NormalizeVector(vecDir, vecDir);
         GetVectorAngles(vecDir, angDir);
+
+        //float angDir[3];
+        //anim.GetPropVector(Prop_Data, "m_angCurrentAngles", angDir);
+        //angDir[0] *= -1;
 
         //float flPitch = anim.GetPoseParameter(iPitch);
         //float flYaw = anim.GetPoseParameter(iYaw);
 
         angDir[0] = FloatClamp(AngleNormalize2(angDir[0]), -44.0, 89.0);
-        //anim.SetPoseParameter(iPitch, ApproachAngle2(angDir[0], flPitch, 1.0));
+        //anim.SetPoseParameter(iPitch, ApproachAngle2(angDir[0], flPitch, 10.0));
         anim.SetPoseParameter(iPitch, angDir[0]);
 
         //Doens't work as intended, yaw changes too fast, faster than model rotation...
-        //angDir[1] = FloatClamp(-AngleNormalize2(AngleDiff2(AngleNormalize2(angDir[1]), AngleNormalize2(angBot[1] + 180.0))), -44.0, 44.0);
-        //anim.SetPoseParameter(iYaw, ApproachAngle2(angDir[1], flYaw, 1.0));
+        //Nope, still works badly
+        angDir[1] = FloatClamp(-AngleNormalize2(AngleDiff2(AngleNormalize2(angDir[1]), AngleNormalize2(angBot[1] + 180.0))), -44.0, 44.0);
+        //anim.SetPoseParameter(iYaw, ApproachAngle2(angDir[1], flYaw, 10.0));
         //anim.SetPoseParameter(iYaw, angDir[1]);
 	}
 
-    public bool IsHeadAimingOnTarget()
+    public float GetHeadSteadyDuration()
     {
         INextBot bot = this.GetBot();
-        return CBaseEntity(bot.GetEntity()).GetProp(Prop_Data, "m_bIsSightedIn");
+        CBaseEntity ent = CBaseEntity(bot.GetEntity());
+        if (ent.HasProp(Prop_Data, "m_flHeadSteadyTimer") && ent.GetPropFloat(Prop_Data, "m_flHeadSteadyTimer") > 0.0)
+            return GetGameTime() - ent.GetPropFloat(Prop_Data, "m_flHeadSteadyTimer");
     }
 
     public void Upkeep()
+    {
+        INextBot bot = this.GetBot();
+        CBaseEntity ent = CBaseEntity(bot.GetEntity());
+
+        int iTarget = CBaseEntity(bot.GetEntity()).GetPropEnt(Prop_Data, "m_hTarget");
+        if (iTarget <= 0)
+        {
+            CBaseEntity(bot.GetEntity()).SetProp(Prop_Data, "m_bIsSightedIn", false);
+        }
+        int iSkill = CBaseEntity(bot.GetEntity()).GetProp(Prop_Data, "m_iSkill");
+
+        float angEyes[3];
+        ent.GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
+
+        float angPriorAngles[3];
+        ent.GetPropVector(Prop_Data, "m_angPriorAngles", angPriorAngles);
+
+        float vecEyePos[3];
+        this.GetEyePositionEx(vecEyePos);
+
+        if (GetGameTime() > ent.GetPropFloat(Prop_Data, "m_flLookAtExpireTimer") && ent.GetPropFloat(Prop_Data, "m_flLookAtExpireTimer") > 0.0)
+        {
+            iTarget = -1;
+            ent.SetPropEnt(Prop_Data, "m_hTarget", -1);
+            ent.SetProp(Prop_Data, "m_bIsSightedIn", false);
+            ent.SetPropFloat(Prop_Data, "m_flLookAtExpireTimer", 0.0);
+        }
+
+        float vecTargetPos[3];
+        bool bSeeThreat = false;
+        if (iTarget > 0)
+        {
+            bSeeThreat = this.IsAbleToSeeTarget(iTarget, vecTargetPos);
+
+            if (IsNullVector(vecTargetPos))
+                CBaseAnimating(iTarget).WorldSpaceCenter(vecTargetPos);
+        }
+
+        if (iTarget <= 0)
+        {
+            float angRot[3], vecForward[3];
+            ent.GetPropVector(Prop_Data, "m_angAbsRotation", angRot);
+
+            GetAngleVectors(angRot, vecForward, NULL_VECTOR, NULL_VECTOR);
+            vecTargetPos[0] = vecEyePos[0] + vecForward[0] * 100.0;
+            vecTargetPos[1] = vecEyePos[1] + vecForward[1] * 100.0;
+            vecTargetPos[2] = vecEyePos[2] + vecForward[2] * 100.0;
+        }
+
+        this.LookAtPos(vecTargetPos, CBotBody.GetHeadAimTrackingInterval(iSkill));
+
+        //float angEyes[3];
+        //CBaseEntity(bot.GetEntity()).GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
+
+        ent.SetProp(Prop_Data, "m_bIsSightedIn", bSeeThreat);
+    }
+
+    public void Upkeep2()
     {
         INextBot bot = this.GetBot();
         int iTarget = CBaseEntity(bot.GetEntity()).GetPropEnt(Prop_Data, "m_hTarget");

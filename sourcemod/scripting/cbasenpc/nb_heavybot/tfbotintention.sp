@@ -481,7 +481,8 @@ methodmap CTFBotIntention < IIntention
         if (GetRandomInt(1, 100) > iNoticeChance)
             return;
 
-        ent.MyNextBotPointer().GetVisionInterface().AddKnownEntity(whoFired);
+        if (ent.MyNextBotPointer().GetVisionInterface().GetKnown(whoFired) == NULL_KNOWN_ENTITY)
+            ent.MyNextBotPointer().GetVisionInterface().AddKnownEntity(whoFired);
     }
 
     public static bool IsQuietWeapon(int weapon)

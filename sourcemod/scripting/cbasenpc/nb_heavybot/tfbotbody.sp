@@ -6,7 +6,7 @@
 
 #define DEBBUGING 0
 
-#define TFBOT_BODY_VERSION "1.1"
+#define TFBOT_BODY_VERSION "1.2"
 
 methodmap CTFBotBody < IBody
 {
@@ -56,7 +56,8 @@ methodmap CTFBotBody < IBody
         {
             if (!this.IsHeadSteady() || this.GetHeadSteadyDuration() < nb_head_aim_settle_duration)
             {
-                return;
+                //Looks like I finnaly found the culprit behid the poorly aim, the culprit is... steady checks... (if a target moving a little, then ai whill stop shooting)
+                //return;
             }
         }
 

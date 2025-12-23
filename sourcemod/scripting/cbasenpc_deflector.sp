@@ -23,6 +23,8 @@ public Plugin myinfo =
 #define BASE_HEALTH 5000
 #define BASE_SPEED 230.0
 
+#define FOOTSTEPS_COOLDOWN 0.4
+
 #define NEXTBOT_CUSTOM_CLASS_NAME "nb_heavybot"
 
 #define AC_STATE_IDLE 0
@@ -45,6 +47,7 @@ ConVar g_CVar_killfeed;
 ConVar g_CVar_fair_fight;
 ConVar g_CVar_use_fov;
 ConVar g_CVar_team_mode;
+ConVar g_CVar_spy_cloak_visible;
 
 char g_szGibs[][] =
 {
@@ -164,6 +167,14 @@ methodmap CTFMinigun < INextBot
 
         if (szModel[0] != '\0')
         {
+            //Some rocket models can lead us to a server crash, because of lack of physics model or smth like that
+            //I don't think server crashes because of not precaching every rocket model, because I think it's done already by a tf2
+            //TODO: Check every physic model
+            char szClassName[64];
+            GetEntityClassname(ent, szClassName, sizeof(szClassName));
+            if (StrEqual(szClassName, "tf_projectile_rocket"))
+                szModel = "models/weapons/w_models/w_rocket.mdl";
+
             int iProp = CreateEntityByName("prop_physics_multiplayer");
             DispatchKeyValue(iProp, "model", szModel);
             DispatchKeyValue(iProp, "physicsmode", "2");
@@ -328,7 +339,7 @@ methodmap CTFMinigun < INextBot
                             NormalizeVector(vecDir, vecDir);
                             GetVectorAngles(vecDir, vecDir);
 
-                            Handle hTrace = TR_TraceRayFilterEx(vecEyePos, vecDir, (MASK_SOLID|CONTENTS_HITBOX), RayType_Infinite, Filter_WorldOnly, ent.index);
+                            Handle hTrace = TR_TraceRayFilterEx(vecEyePos, vecDir, (MASK_SOLID|CONTENTS_HITBOX), RayType_Infinite, Filter_BulletTrace, ent.index);
 
                             if (TR_GetFraction(hTrace) < 1.0)
                             {
@@ -422,11 +433,12 @@ public void OnPluginStart()
     HeavyRobotBot.Initialize();
 
     CreateConVar("sm_nextbot_deflector_version", VERSION, "Plugin version", FCVAR_NOTIFY);
-    g_CVar_aim = CreateConVar("sm_nextbot_deflector_aim", "1", "0 - Use TFBot aim system, BUGGED! See plugin page for info. 1 - Use same system as TFBot, but a little different and fixed");
+    g_CVar_aim = CreateConVar("sm_nextbot_deflector_aim", "1", "0 - Use TFBot aim system. 1 - Use same system as TFBot, but a little different");
     g_CVar_killfeed = CreateConVar("sm_nextbot_deflector_killfeed", "1", "Should the Deflector's kills/deaths be listed in the killfeed?");
     g_CVar_fair_fight = CreateConVar("sm_nextbot_deflector_fair_fight", "0", "If set, AI will ignore players who are in places where there is no navmesh to prevent AI abuse, and these players cant damage the Deflector nextbot, more info on a plugin page");
     g_CVar_use_fov = CreateConVar("sm_nextbot_deflector_use_fov", "0", "If set, NextBot will use FOV system to detect his threats");
     g_CVar_team_mode = CreateConVar("sm_nextbot_deflector_team_mode", "0", "For sm_nextbot_deflector_killfeed, 0 - fake client spawned in unassigned team and can be switched to another team; 1 - fake client always will be in unassigned team; 2 - fake client will change team depends on nextbot team");
+    g_CVar_spy_cloak_visible = CreateConVar("sm_nextbot_deflecto_spy_cloak_visible", "0", "If set, NextBot will always target invisible spies");
 
     HookConVarChange(g_CVar_team_mode, OnCVarChanged_team_mode);
 
