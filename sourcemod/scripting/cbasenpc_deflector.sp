@@ -5,12 +5,12 @@
 #include <tf2_stocks>
 #include <tf2>
 
-#define VERSION "1.1"
+#define VERSION "1.3"
 
 public Plugin myinfo =
 {
 	name = "[TF2] [CBaseNPC] Deflector Heavy",
-	author = "Bloomstorm",
+	author = "Bloomstorm, HowToPlayMeow",
 	description = "Allows to spawn NextBot Deflector Heavy",
 	version = VERSION,
 	url = "https://bloomstorm.su/"
@@ -41,6 +41,8 @@ public Plugin myinfo =
 #define MINIGUN_SND_LEVEL 95
 
 #define PATTACH_POINT_FOLLOW 4
+
+#define EXPERIMENT_CAMERA 0
 
 ConVar g_CVar_aim;
 ConVar g_CVar_killfeed;
@@ -119,8 +121,13 @@ methodmap CTFMinigun < INextBot
                 GetEntityClassname(i, szClassName, sizeof(szClassName));
                 //Only rockets, pipes, sticky bombs, jarate, milk and cleavers can be deflected. The other projectiles could lead to a server crash
                 if (StrEqual(szClassName, "tf_projectile_rocket") || StrEqual(szClassName, "tf_projectile_pipe") || StrEqual(szClassName, "tf_projectile_jar") || StrEqual(szClassName, "tf_projectile_jar_milk") || StrEqual(szClassName, "tf_projectile_cleaver") ||
-                StrEqual(szClassName, "tf_projectile_pipe_remote"))
+                StrEqual(szClassName, "tf_projectile_pipe_remote") || StrEqual(szClassName, "tf_projectile_energy_ball"))
                 {
+                    if (this.IsRocketBehindMe(i))
+                    {
+                        continue;
+                    }
+                    //TODO: Replace by something nice, TR_ or smth
                     GetEntPropVector(i, Prop_Send, "m_vecOrigin", vecRocketPos);
                     if (GetVectorDistance(vecRocketPos, vecPos) <= 150.0)
                     {
@@ -174,6 +181,8 @@ methodmap CTFMinigun < INextBot
             GetEntityClassname(ent, szClassName, sizeof(szClassName));
             if (StrEqual(szClassName, "tf_projectile_rocket"))
                 szModel = "models/weapons/w_models/w_rocket.mdl";
+            if (StrEqual(szClassName, "tf_projectile_energy_ball"))
+                return;
 
             int iProp = CreateEntityByName("prop_physics_multiplayer");
             DispatchKeyValue(iProp, "model", szModel);
@@ -204,6 +213,30 @@ methodmap CTFMinigun < INextBot
         //    BfWriteAngles(hMsg, angRot);
         //    EndMessage();
         //}
+    }
+
+    public bool IsRocketBehindMe(int rocket)
+    {
+        CBaseEntity ent = CBaseEntity(this.GetEntity());
+
+        float vecBotForward[3], angEyes[3];
+
+        ent.GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
+        GetAngleVectors(angEyes, vecBotForward, NULL_VECTOR, NULL_VECTOR);
+        vecBotForward[2] = 0.0;
+        NormalizeVector(vecBotForward, vecBotForward);
+
+        float vecBotPos[3], vecRocketPos[3], vecToBot[3];
+        ent.WorldSpaceCenter(vecBotPos);
+        CBaseEntity(rocket).WorldSpaceCenter(vecRocketPos);
+
+        SubtractVectors(vecBotPos, vecRocketPos, vecToBot);
+        vecToBot[2] = 0.0;
+        NormalizeVector(vecToBot, vecToBot);
+
+        float flDot = GetVectorDotProduct(vecBotForward, vecToBot);
+
+        return flDot > -0.1;
     }
 
     public void WindUp()
@@ -368,10 +401,10 @@ methodmap CTFMinigun < INextBot
 
                             delete hTrace;
 
-                            ShootLaserEx(ent.m_hMyWeapon.index, "bullet_tracer02_blue", vecMuzzlePos, vecEndPos, false, 4, iAttachment);
+                            ShootLaserEx(ent.m_hMyWeapon.index, "bullet_tracer02_blue", vecMuzzlePos, vecEndPos, false, PATTACH_POINT_FOLLOW, iAttachment);
                         }
 
-                        CreateParticleEx("muzzle_minigun", vecMuzzlePos, vecAngles, ent.m_hMyWeapon.index, 4, iAttachment);
+                        CreateParticleEx("muzzle_minigun", vecMuzzlePos, vecAngles, ent.m_hMyWeapon.index, PATTACH_POINT_FOLLOW, iAttachment);
 
                         ent.m_flNextPrimaryAttack = GetGameTime() + 0.1;
 
@@ -453,6 +486,10 @@ public void OnPluginStart()
     HookEvent("npc_hurt", Event_NpcHurt);
     HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
 
+#if EXPERIMENT_CAMERA
+    RegAdminCmd("sm_deflectorbot_camera", Cmd_Test2, ADMFLAG_RCON);
+#endif
+
     g_szFakeClientName = "Giant Deflector Heavy";
 }
 
@@ -489,13 +526,17 @@ public void OnMapStart()
 	}
 }
 
-public void OnEntityCreated(int client, const char[] className)
+public void OnEntityCreated(int entity, const char[] className)
 {
     if (!g_CVar_killfeed.BoolValue)
         return;
 	if (StrEqual(className, "nb_heavybot"))
 	{
 		CBot.AddFakeClient();
+
+		CBot.FixHitbox(entity);
+		CBot.AddSniperHeadshotSupport(entity);
+		CBot.AddSpyBackstabSupport(entity);
 	}
 }
 
@@ -529,6 +570,11 @@ public void OnEntityDestroyed(int entity)
             CBot.RemoveFakeClient();
 		}
 		CreateTimer(0.1, Timer_CheckForSure, _, TIMER_FLAG_NO_MAPCHANGE);
+
+		//if (EntRefToEntIndex(g_iBossHealthbarRef) == entity)
+		//{
+        //    CBotBossHealthbar.UpdateBossHealth();
+		//}
 	}
 }
 
@@ -639,6 +685,8 @@ public Action Event_PlayerTeam(Event event, const char[] name, bool dontBroadcas
 public Action TF2_CalcIsAttackCritical(int client, int weapon, char[] weaponname, bool& result)
 {
 	CTFBotIntention.OnClientWeaponFired(client, weapon);
+
+	CBot.HandleBackstabLogic(client, weapon);
 }
 
 bool IsClientFriendlyKostyl(int client)
@@ -851,13 +899,14 @@ public Action Cmd_Test(int client, int args)
 {
     if (args < 1)
     {
-        ReplyToCommand(client, "Usage: sm_deflectorbot <blue;blu/red/gray;grey;none;neutral> [health]");
+        ReplyToCommand(client, "Usage: sm_deflectorbot <blue;blu/red/gray;grey;none;neutral> [health] [display health bar]");
         return Plugin_Handled;
     }
 
-    char szArg[64], szArg2[64];
+    char szArg[64], szArg2[64], szArg3[8];
 	GetCmdArg(1, szArg, sizeof(szArg));
 	GetCmdArg(2, szArg2, sizeof(szArg2));
+	GetCmdArg(3, szArg3, sizeof(szArg3));
 
 	int iHealth = 0;
 	int iTeamNum = 0;
@@ -911,9 +960,68 @@ public Action Cmd_Test(int client, int args)
 		bot.Spawn();
 
 		ReplyToCommand(client, "Spawned a Giant Deflector Heavy %i", bot.index);
+
+		#if EXPERIMENT_CAMERA
+        int iCamera = CreateEntityByName("prop_dynamic_override");
+
+        if (iCamera > 0)
+        {
+            DispatchKeyValue(iCamera, "targetname", "gmod_prop2");
+            DispatchKeyValue(iCamera, "DisableBoneFollowers", "1");
+            //DispatchKeyValue(iCamera, "angles", anglesStr);
+
+            SetEntProp(iCamera, Prop_Send, "m_nSolidType", 6);
+            SetEntProp(iCamera, Prop_Data, "m_nSolidType", 6);
+
+            PrecacheModel("models/weapons/c_models/c_bread/c_bread_crumpet.mdl");
+            DispatchKeyValue(iCamera, "model", "models/weapons/c_models/c_bread/c_bread_crumpet.mdl");
+
+            //TeleportEntity(iCamera, pos, NULL_VECTOR, NULL_VECTOR);
+
+            DispatchSpawn(iCamera);
+        }
+
+        bot.SetPropEnt(Prop_Data, "m_hCamera", iCamera);
+        ReplyToCommand(client, "m_hCamera %i", iCamera);
+		#endif
+
+		if (StringToInt(szArg3) > 0)
+		{
+            CBotBossHealthbar.SetBossName(g_szFakeClientName);
+            CBotBossHealthbar.SetBoss(bot.index);
+            //g_iBossHealthbarTargetRef = EntIndexToEntRef(bot.index);
+            //CBotBossHealthbar.UpdateBossHealth();
+		}
 	}
 	return Plugin_Handled;
 }
+
+#if EXPERIMENT_CAMERA
+public Action Cmd_Test2(int client, int args)
+{
+    char szArg[64];
+	char szArg2[64];
+
+	GetCmdArg(1, szArg, sizeof(szArg));
+	GetCmdArg(2, szArg2, sizeof(szArg2));
+
+	int iTargetEnt = StringToInt(szArg);
+
+	SetClientViewEntity(client, iTargetEnt);
+
+	ReplyToCommand(client, "Your client index %i. To restore your camera, use sm_deflectorbot_camera %i", client, client);
+
+	//int iTarget = FindTarget(client, szArg);
+	//if (iTarget > 0)
+	//{
+		//void SetClientViewEntity(int client, int entity)
+	//	SetClientViewEntity(iTarget, StringToInt(szArg2));
+	//	ReplyToCommand(client, "Set %i to %i", iTarget, StringToInt(szArg2));
+	//	ReplyToCommand(client, "To ")
+	//}
+	return Plugin_Handled;
+}
+#endif
 
 stock bool IsStringNumeric(const char[] str)
 {

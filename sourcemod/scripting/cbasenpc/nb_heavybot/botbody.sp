@@ -1,6 +1,6 @@
 //#define DEBUG_BOT_BODY
 
-#define BOT_BODY_VERSION "1.2"
+#define BOT_BODY_VERSION "1.3"
 
 //Define these in BeginDataMapDesc()
 /*
@@ -44,7 +44,7 @@ methodmap CBotBody < IBody
         return 1.0;
     }
 
-    public void AimHeadTowards(int target, int priority, float duration)
+    public void AimHeadTowardsTarget(int target, int priority, float duration)
     {
         INextBot bot = this.GetBot();
         CBaseEntity ent = CBaseEntity(bot.GetEntity());
@@ -58,6 +58,29 @@ methodmap CBotBody < IBody
         }
 
         ent.SetPropEnt(Prop_Data, "m_hTarget", target);
+
+        ent.SetPropFloat(Prop_Data, "m_flLookAtExpireTimer", GetGameTime() + duration);
+
+        ent.SetProp(Prop_Data, "m_iLookAtPriority", priority);
+        ent.SetPropFloat(Prop_Data, "m_flLookAtDurationTimer", GetGameTime());
+        ent.SetProp(Prop_Data, "m_bHasBeenSightedIn", false);
+    }
+
+    public void AimHeadTowards(float pos[3], int priority, float duration)
+    {
+        INextBot bot = this.GetBot();
+        CBaseEntity ent = CBaseEntity(bot.GetEntity());
+
+        if (duration <= 0.0)
+            duration = 0.1;
+
+        if (ent.GetProp(Prop_Data, "m_iLookAtPriority") > priority && ent.GetPropFloat(Prop_Data, "m_flLookAtExpireTimer") > GetGameTime())
+        {
+            return;
+        }
+
+        ent.SetPropVector(Prop_Data, "m_vecLookAtPos", pos);
+        ent.SetPropEnt(Prop_Data, "m_hTarget", -1);
 
         ent.SetPropFloat(Prop_Data, "m_flLookAtExpireTimer", GetGameTime() + duration);
 
@@ -562,6 +585,7 @@ methodmap CBotBody < IBody
             iTarget = -1;
             ent.SetPropEnt(Prop_Data, "m_hTarget", -1);
             ent.SetProp(Prop_Data, "m_bIsSightedIn", false);
+            ent.SetPropVector(Prop_Data, "m_vecLookAtPos", NULL_VECTOR);
             ent.SetPropFloat(Prop_Data, "m_flLookAtExpireTimer", 0.0);
         }
 
@@ -577,13 +601,19 @@ methodmap CBotBody < IBody
 
         if (iTarget <= 0)
         {
-            float angRot[3], vecForward[3];
-            ent.GetPropVector(Prop_Data, "m_angAbsRotation", angRot);
+            ent.GetPropVector(Prop_Data, "m_vecLookAtPos", vecTargetPos);
 
-            GetAngleVectors(angRot, vecForward, NULL_VECTOR, NULL_VECTOR);
-            vecTargetPos[0] = vecEyePos[0] + vecForward[0] * 100.0;
-            vecTargetPos[1] = vecEyePos[1] + vecForward[1] * 100.0;
-            vecTargetPos[2] = vecEyePos[2] + vecForward[2] * 100.0;
+            //No force target or pos, looking at default pos
+            if (IsNullVector(vecTargetPos))
+            {
+                float angRot[3], vecForward[3];
+                ent.GetPropVector(Prop_Data, "m_angAbsRotation", angRot);
+
+                GetAngleVectors(angRot, vecForward, NULL_VECTOR, NULL_VECTOR);
+                vecTargetPos[0] = vecEyePos[0] + vecForward[0] * 100.0;
+                vecTargetPos[1] = vecEyePos[1] + vecForward[1] * 100.0;
+                vecTargetPos[2] = vecEyePos[2] + vecForward[2] * 100.0;
+            }
         }
 
         this.LookAtPos(vecTargetPos, CBotBody.GetHeadAimTrackingInterval(iSkill));
@@ -592,81 +622,6 @@ methodmap CBotBody < IBody
         //CBaseEntity(bot.GetEntity()).GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
 
         ent.SetProp(Prop_Data, "m_bIsSightedIn", bSeeThreat);
-    }
-
-    public void Upkeep2()
-    {
-        INextBot bot = this.GetBot();
-        int iTarget = CBaseEntity(bot.GetEntity()).GetPropEnt(Prop_Data, "m_hTarget");
-        if (iTarget <= 0)
-        {
-            CBaseEntity(bot.GetEntity()).SetProp(Prop_Data, "m_bIsSightedIn", false);
-            return;
-        }
-        int iSkill = CBaseEntity(bot.GetEntity()).GetProp(Prop_Data, "m_iSkill");
-
-        float vecEyePos[3];
-        this.GetEyePositionEx(vecEyePos);
-
-        float vecTargetPos[3];
-        this.IsAbleToSeeTarget(iTarget, vecTargetPos);
-
-        if (IsNullVector(vecTargetPos))
-            CBaseAnimating(iTarget).WorldSpaceCenter(vecTargetPos);
-
-        this.LookAtPos(vecTargetPos, CBotBody.GetHeadAimTrackingInterval(iSkill));
-
-        float vecRes[3];
-        CBaseEntity(bot.GetEntity()).GetPropVector(Prop_Data, "m_angCurrentAngles", vecRes);
-
-        //PrintCenterTextAll("%.5f %.1f %.1f %.1f", GetHeadAimTrackingInterval2(iSkill), vecRes[0], vecRes[1], vecRes[2]);
-
-        Handle hTrace = TR_TraceRayFilterEx(vecEyePos, vecRes, (MASK_SOLID|CONTENTS_HITBOX), RayType_Infinite, Filter_WorldOnly, bot.GetEntity());
-
-        if (TR_GetFraction(hTrace) < 1.0)
-        {
-            if (TR_GetEntityIndex(hTrace) == -1)
-            {
-                delete hTrace;
-                CBaseEntity(bot.GetEntity()).SetProp(Prop_Data, "m_bIsSightedIn", false);
-                return;
-            }
-        }
-
-#if defined DEBUG_BOT_BODY
-        float vecEndPos[3];
-        TR_GetEndPosition(vecEndPos, hTrace);
-#endif
-
-        int iTraceTarget = TR_GetEntityIndex(hTrace);
-        delete hTrace;
-
-#if defined DEBUG_BOT_BODY
-        int iColour2[4];
-        iColour2[0] = 255;
-        iColour2[1] = 0;
-        iColour2[2] = 0;
-        iColour2[3] = 255;
-
-        TE_SetupBeamPoints(vecEyePos, vecEndPos, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
-        TE_SendToAll();
-
-        float vecForward[3], vecDir[3];
-        GetAngleVectors(vecRes, vecForward, NULL_VECTOR, NULL_VECTOR);
-
-        vecDir[0] = vecEyePos[0] + (100.0 * vecForward[0]);
-        vecDir[1] = vecEyePos[1] + (100.0 * vecForward[1]);
-        vecDir[2] = vecEyePos[2] + (100.0 * vecForward[2]);
-
-        iColour2[0] = 0;
-        iColour2[1] = 0;
-        iColour2[2] = 255;
-
-        TE_SetupBeamPoints(vecEyePos, vecDir, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
-        TE_SendToAll();
-#endif
-
-        CBaseEntity(bot.GetEntity()).SetProp(Prop_Data, "m_bIsSightedIn", iTarget == iTraceTarget);
     }
 
     //If your nextbot model is big, then we need apply extra offset

@@ -26,7 +26,23 @@ float g_flLastChangedTime;
 
 int g_iFakeClientTeamMode;
 
+//int g_iBossHealthbarRef;
+int g_iBossHealthbarTargetRef;
+
+bool g_bBossHealthbarDisplayHp = true;
+bool g_bBossHealthbarDisplayPercent = true;
+char g_szBossHealthbarName[64];
+
+Handle g_hBosshealthbarHud;
+Handle g_hBossHealthbarUpdate;
+
+bool g_bBackstabEnabled = false;
+float g_flBackstabDamage = 450.0;
+float g_flBackstabDelay = 1.5;
+
 //bool g_bDebugLookAt;
+
+//TODO: Refactor code
 
 stock void ReqFrameCreateEvent(DataPack pack)
 {
@@ -66,6 +82,267 @@ public Action FakeClient_OnTakeDamage(int victim, int &attacker, int &inflictor,
 		return Plugin_Stop;
 	}
 	return Plugin_Continue;
+}
+
+//Credit: titantf & HowToPlayMeow Any Headshot
+public Action NextBot_TraceAttackHeadshot(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &ammotype, int hitbox, int hitgroup)
+{
+    if (attacker > MaxClients)
+        return Plugin_Continue;
+
+    if (hitgroup != 1)
+        return Plugin_Continue;
+
+    if (TF2_GetPlayerClass(attacker) != TFClass_Sniper && TF2_GetPlayerClass(attacker) != TFClass_Spy)
+        return Plugin_Continue;
+
+    int iWeapon = GetEntPropEnt(attacker, Prop_Send, "m_hActiveWeapon");
+    if (iWeapon == -1)
+        return Plugin_Continue;
+
+    int iItemDefIndex = GetEntProp(iWeapon, Prop_Send, "m_iItemDefinitionIndex");
+
+    if (iItemDefIndex == 230) // Sydney Sleeper
+        return Plugin_Continue;
+
+    //61 and 1006 are Ambassador
+    if ((iItemDefIndex == 61 || iItemDefIndex == 1006) || TF2_IsPlayerInCondition(attacker, TFCond_Zoomed))
+    {
+        damagetype |= DMG_CRIT;
+        return Plugin_Changed;
+    }
+    return Plugin_Continue;
+}
+
+//Credit: Scags TF2-Backstab-Bosses
+public Action NextBot_OnTakeDamageBackstab(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damagecustom)
+{
+    //PrintToChatAll("NextBot_OnTakeDamageBackstab prepare");
+    if (!IsValidEntity(weapon) || !HasEntProp(weapon, Prop_Send, "m_bReadyToBackstab") || !GetEntProp(weapon, Prop_Send, "m_bReadyToBackstab"))
+        return Plugin_Continue;
+
+    //PrintToChatAll("Test");
+
+    EmitSoundToAll("player/spy_shield_break.wav", attacker, _, SNDLEVEL_TRAFFIC, SND_NOFLAGS, 1.0, 100, _, _, NULL_VECTOR, true, 0.0);
+	EmitSoundToAll("player/crit_received3.wav", attacker, _, SNDLEVEL_TRAFFIC, SND_NOFLAGS, 1.0, 100, _, _, NULL_VECTOR, true, 0.0);
+
+    int iViewModel = GetEntPropEnt(attacker, Prop_Send, "m_hViewModel");
+    int iItemDefIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
+    int iSequence;
+
+    if (g_flBackstabDelay > 0.0)
+    {
+        if (iViewModel != -1)
+        {
+            iSequence = 15;
+            switch (iItemDefIndex)
+            {
+                case 727: iSequence = 41;
+                case 4, 194, 665, 794, 803, 883, 892, 901, 910: iSequence = 10;
+                case 638: iSequence = 31;
+            }
+            SetEntProp(iViewModel, Prop_Send, "m_nSequence", iSequence);
+        }
+
+        SetEntPropFloat(weapon, Prop_Send, "m_flNextPrimaryAttack", GetGameTime() + g_flBackstabDelay);
+        SetEntPropFloat(weapon, Prop_Send, "m_flNextSecondaryAttack", GetGameTime() + g_flBackstabDelay);
+    }
+    else if (iViewModel != -1)
+    {
+        iSequence = 38;
+        switch (iItemDefIndex)
+        {
+            case 225, 356, 461, 574, 649: iSequence = 12;
+            case 638: iSequence = 28;
+            case 423: iSequence = 22;
+        }
+        SetEntProp(iViewModel, Prop_Send, "m_nSequence", iSequence);
+    }
+
+    damage = g_flBackstabDamage;
+    //damage /= 3.0;
+    return Plugin_Changed;
+}
+
+stock int Backstab_DoSwingTrace(int client)
+{
+	static float vecSwingMins[3] = { -18.0, -18.0, -18.0 };
+	static float vecSwingMaxs[3] = { 18.0, 18.0, 18.0 };
+
+	// Setup the swing range.
+	float vecForward[3];
+	float vecEyes[3];
+	GetClientEyeAngles(client, vecEyes);
+	GetAngleVectors(vecEyes, vecForward, NULL_VECTOR, NULL_VECTOR);
+	float vecSwingStart[3]; GetClientEyePosition(client, vecSwingStart);
+
+	ScaleVector(vecForward, 48.0);
+	float vecSwingEnd[3];
+	AddVectors(vecSwingStart, vecForward, vecSwingEnd);
+
+	// See if we hit anything.
+
+	Handle hTrace = TR_TraceRayFilterEx(vecSwingStart, vecSwingEnd, MASK_SOLID, RayType_EndPoint, Filter_BackstabBoss, client);
+
+	float flFraction = TR_GetFraction(hTrace);
+	delete hTrace;
+
+	//PrintToChatAll("fraction 1 %.1f %b", flFraction, flFraction >= 1.0);
+
+	//if (flFraction >= 1.0)
+	if (flFraction >= 0.9)
+	{
+        hTrace = TR_TraceHullFilterEx(vecSwingStart, vecSwingEnd, vecSwingMins, vecSwingMaxs, MASK_SOLID, Filter_BackstabBoss, client);
+        flFraction = TR_GetFraction(hTrace);
+        int iTarget = TR_GetEntityIndex(hTrace);
+        delete hTrace;
+
+        //PrintToChatAll("fraction 2 %.1f %b", flFraction, flFraction < 1.0);
+        if (flFraction < 1.0)
+        {
+            return iTarget;
+        }
+	}
+	return -1;
+}
+
+stock bool Backstab_IsBehindMe(int client, int target)
+{
+    CBaseEntity ent = CBaseEntity(target);
+
+    float vecBotForward[3], angEyes[3];
+
+    ent.GetPropVector(Prop_Data, "m_angRotation", angEyes);
+    GetAngleVectors(angEyes, vecBotForward, NULL_VECTOR, NULL_VECTOR);
+    vecBotForward[2] = 0.0;
+    NormalizeVector(vecBotForward, vecBotForward);
+
+    float vecBotPos[3], vecRocketPos[3], vecToBot[3];
+    ent.WorldSpaceCenter(vecBotPos);
+    CBaseEntity(client).WorldSpaceCenter(vecRocketPos);
+
+    SubtractVectors(vecBotPos, vecRocketPos, vecToBot);
+    vecToBot[2] = 0.0;
+    NormalizeVector(vecToBot, vecToBot);
+
+    float flDot = GetVectorDotProduct(vecBotForward, vecToBot);
+
+    //PrintToChatAll("%.2f %b", flDot, flDot > -0.1);
+
+    return flDot > -0.1;
+}
+
+public bool Filter_BackstabBoss(int ent, int mask, any data)
+{
+	char classname[32]; GetEntityClassname(ent, classname, 32);
+	if (!StrEqual(classname, NEXTBOT_CUSTOM_CLASS_NAME))
+        return false;
+
+	//if (!strcmp(classname, NEXTBOT_CUSTOM_CLASS_NAME, false))
+		//return true;
+
+	return ent != data;
+}
+
+//TODO: Create g_vecMinsBuffer and g_vecMaxsBuffer for CBot.FixHitbox
+//Credit: HowToPlayMeow
+public void NextBot_SpawnPostFixHitbox(int entity)
+{
+    float vecMins[3] = { -40.0, -40.0, 0.0 };
+    float vecMaxs[3] = { 40.0, 40.0, 155.0 };
+
+    SetEntPropVector(entity, Prop_Send, "m_vecMins", vecMins);
+    SetEntPropVector(entity, Prop_Send, "m_vecMaxs", vecMaxs);
+
+    TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+}
+
+//Credit: HowToPlayMeow
+public Action Timer_BossHealthbarHUD(Handle timer)
+{
+    if (g_hBosshealthbarHud == null)
+    {
+        g_hBosshealthbarHud = CreateHudSynchronizer();
+    }
+
+    int iEnt = EntRefToEntIndex(g_iBossHealthbarTargetRef);
+    if (iEnt == -1)
+    {
+        g_hBossHealthbarUpdate = null;
+        return Plugin_Stop;
+    }
+
+    int iHealth = GetEntProp(iEnt, Prop_Data, "m_iHealth");
+    int iMaxHealth = GetEntProp(iEnt, Prop_Data, "m_iMaxHealth");
+
+    if (iHealth < 0 || iMaxHealth < 0)
+    {
+        g_hBossHealthbarUpdate = null;
+        return Plugin_Stop;
+    }
+
+    float flPercent = float(iHealth) / float(iMaxHealth) * 100.0;
+
+    char szHealthbar[64];
+    HealthBarFill(flPercent, szHealthbar, sizeof(szHealthbar));
+
+    int r = 0, g = 255, b = 0;
+    if (flPercent <= 30.0)
+    {
+        r = 255;
+        g = 0;
+        b = 0;
+    }
+    else if (flPercent <= 60.0)
+    {
+        r = 255;
+        g = 120;
+        b = 0;
+    }
+
+    bool bDisplayHealth = g_bBossHealthbarDisplayHp;
+    bool bDisplayPercent = g_bBossHealthbarDisplayPercent;
+
+    char szHealthbarRes[128];
+
+    Format(szHealthbarRes, sizeof(szHealthbarRes), "[%s]\n%s", g_szBossHealthbarName, szHealthbar);
+
+    if (bDisplayHealth)
+    {
+        Format(szHealthbarRes, sizeof(szHealthbarRes), "%s\n%d / %d", szHealthbarRes, iHealth, iMaxHealth);
+    }
+    if (bDisplayPercent)
+    {
+        //Symbol % is missing for some reason...
+        //Format(szHealthbarRes, sizeof(szHealthbarRes), "%s (%.0f%%)", szHealthbarRes, flPercent);
+        Format(szHealthbarRes, sizeof(szHealthbarRes), "%s (%.0f%%%%)", szHealthbarRes, flPercent);
+    }
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (!IsClientInGame(i))
+            continue;
+
+        SetHudTextParams(-1.0, 0.12, 0.25, r, g, b, 255);
+        ShowSyncHudText(i, g_hBosshealthbarHud, szHealthbarRes);
+    }
+    return Plugin_Continue;
+}
+
+stock void HealthBarFill(float percent, char[] buffer, int maxlen)
+{
+    int iTotal = 20;
+    int iFilled = RoundToFloor((percent / 100.0) * iTotal);
+
+    buffer[0] = '\0';
+
+    //TODO: missing symbol on linux, need to create linux.sp with stock CGameLinux.IsLinuxPlayer(int client) and g_bLinuxPlayer[MAXPLAYERS + 1]
+    //QueryClientConVar
+    //Linux: sdl_double_click_size
+    //Windows: windows_speaker_config
+    //For linux: "#" : "_"
+    for (int i = 0; i < iTotal; i++)
+        StrCat(buffer, maxlen, (i < iFilled) ? "█" : "░");
 }
 
 methodmap CBot
@@ -243,6 +520,82 @@ methodmap CBot
                 }
             }
         }
+    }
+
+    /// Call it in OnEntityCreated
+    //TODO: Add custom vecmins and vecmaxs in function
+    public static void FixHitbox(int entity)
+    {
+        SDKHook(entity, SDKHook_SpawnPost, NextBot_SpawnPostFixHitbox);
+    }
+
+    public static void AddSniperHeadshotSupport(int entity)
+    {
+        SDKHook(entity, SDKHook_TraceAttack, NextBot_TraceAttackHeadshot);
+    }
+
+    public static void AddSpyBackstabSupport(int entity)
+    {
+        SDKHook(entity, SDKHook_OnTakeDamage, NextBot_OnTakeDamageBackstab);
+        g_bBackstabEnabled = true;
+    }
+
+    //Call it in TF2_CalcIsAttackCritical
+    public static void HandleBackstabLogic(int client, int weapon)
+    {
+        if (!g_bBackstabEnabled || !IsValidEntity(weapon) || !HasEntProp(weapon, Prop_Send, "m_bReadyToBackstab"))
+            return;
+
+        int iTarget = Backstab_DoSwingTrace(client);
+
+        //PrintToChatAll("Target %i", iTarget);
+
+        if (iTarget <= 0)
+            return;
+
+        if (GetEntProp(iTarget, Prop_Send, "m_iTeamNum") == GetClientTeam(client))
+            return;
+
+        if (!Backstab_IsBehindMe(client, iTarget))
+            return;
+
+        //PrintToChatAll("Backstab test");
+
+        SetEntProp(weapon, Prop_Send, "m_bReadyToBackstab", 1);
+    }
+}
+
+methodmap CBotBossHealthbarMonoculus
+{
+    //TODO:
+}
+
+methodmap CBotBossHealthbar
+{
+    public static void SetBoss(int ent)
+    {
+        if (g_hBossHealthbarUpdate != null)
+        {
+            delete g_hBossHealthbarUpdate;
+        }
+
+        g_iBossHealthbarTargetRef = EntIndexToEntRef(ent);
+
+        //If we set TIMER_FLAG_NO_MAPCHANGE, then we need to clear g_hBossHealthbarUpdate = null, but what if a developer forgets to clear g_hBossHealthbarUpdate in OnMapEnd?
+        g_hBossHealthbarUpdate = CreateTimer(0.2, Timer_BossHealthbarHUD, _, TIMER_REPEAT);
+    }
+
+    public static void Cleanup()
+    {
+        if (g_hBossHealthbarUpdate != null)
+        {
+            delete g_hBossHealthbarUpdate;
+        }
+    }
+
+    public static void SetBossName(char[] name)
+    {
+        Format(g_szBossHealthbarName, sizeof(g_szBossHealthbarName), "%s", name);
     }
 }
 

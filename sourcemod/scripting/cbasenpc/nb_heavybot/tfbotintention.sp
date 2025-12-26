@@ -1,4 +1,4 @@
-#define TFBOT_INTENTION_VERSION "1.0"
+#define TFBOT_INTENTION_VERSION "1.1"
 
 //Define these in BeginDataMapDesc()
 /*
@@ -13,6 +13,22 @@
     .DefineIntField("m_iNumOfFailedTraces")
     .DefineFloatField("m_flEyePosHeight")
 */
+
+public Action Timer_IntentionDelayedNotice(Handle timer, DataPack pack)
+{
+    pack.Reset();
+    int iBot = EntRefToEntIndex(pack.ReadCell());
+    int iWho = EntRefToEntIndex(pack.ReadCell());
+
+    if (iBot == -1 || iWho == -1)
+        return Plugin_Stop;
+
+    INextBot bot = CBaseEntity(iBot).MyNextBotPointer();
+
+    if (bot.GetVisionInterface().GetKnown(iWho) == NULL_KNOWN_ENTITY)
+        bot.GetVisionInterface().AddKnownEntity(iWho);
+    return Plugin_Stop;
+}
 
 methodmap CTFBotIntention < IIntention
 {
@@ -409,13 +425,13 @@ methodmap CTFBotIntention < IIntention
         else if (!isImmediateThreat1 && !isImmediateThreat2)
             return closerThreat;
 
-        if (intention.IsThreatFiringAtMe(threat1))
+        if (intention.IsThreatFiringAtMe(threat1.GetEntity()))
         {
             if (intention.IsThreatFiringAtMe(threat2))
                 return closerThreat;
             return threat1;
         }
-        else if (intention.IsThreatFiringAtMe(threat2))
+        else if (intention.IsThreatFiringAtMe(threat2.GetEntity()))
         {
             return threat2;
         }
@@ -623,5 +639,14 @@ methodmap CTFBotIntention < IIntention
 
         //Not on a navmesh, using raycast to prevent AI abuse (sitting on a building floor or a prop like big rock where is navmesh could not exist)
         return true;
+    }
+
+    //TODO: Make something else instead of CreateTimer
+    public void DelayedThreatNotice(int who, float time)
+    {
+        DataPack pack;
+        CreateDataTimer(time, Timer_IntentionDelayedNotice, pack, TIMER_FLAG_NO_MAPCHANGE);
+        pack.WriteCell(EntIndexToEntRef(this.GetBot().GetEntity()));
+        pack.WriteCell(EntIndexToEntRef(who));
     }
 }

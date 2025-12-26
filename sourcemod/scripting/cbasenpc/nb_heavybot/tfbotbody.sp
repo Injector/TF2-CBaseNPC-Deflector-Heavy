@@ -6,7 +6,7 @@
 
 #define DEBBUGING 0
 
-#define TFBOT_BODY_VERSION "1.2"
+#define TFBOT_BODY_VERSION "1.3"
 
 methodmap CTFBotBody < IBody
 {
@@ -46,7 +46,42 @@ methodmap CTFBotBody < IBody
             return GetGameTime() - ent.GetPropFloat(Prop_Data, "m_flHeadSteadyTimer");
     }
 
-    public void AimHeadTowards(int target, int priority, float duration, const char[] reason = "")
+    public void AimHeadTowards(float pos[3], int priority, float duration, const char[] reason = "")
+    {
+        INextBot bot = this.GetBot();
+        if (duration <= 0.0)
+            duration = 0.1;
+        CBaseEntity ent = CBaseEntity(bot.GetEntity());
+        if (ent.GetProp(Prop_Data, "m_iLookAtPriority") == priority)
+        {
+            if (!this.IsHeadSteady() || this.GetHeadSteadyDuration() < nb_head_aim_settle_duration)
+            {
+                //Looks like I finnaly found the culprit behid the poorly aim, the culprit is... steady checks... (if a target moving a little, then ai whill stop shooting)
+                //return;
+            }
+        }
+
+        if (ent.GetProp(Prop_Data, "m_iLookAtPriority") > priority && ent.GetPropFloat(Prop_Data, "m_flLookAtExpireTimer") > GetGameTime())
+        {
+            return;
+        }
+
+        ent.SetPropFloat(Prop_Data, "m_flLookAtExpireTimer", GetGameTime() + duration);
+
+        ent.SetPropEnt(Prop_Data, "m_hLookAtSubject", -1);
+        ent.SetPropVector(Prop_Data, "m_vecLookAtPos", pos);
+        ent.SetProp(Prop_Data, "m_iLookAtPriority", priority);
+        ent.SetPropFloat(Prop_Data, "m_flLookAtDurationTimer", GetGameTime());
+        ent.SetProp(Prop_Data, "m_bHasBeenSightedIn", false);
+
+        //To get rid off warning because I'm too lazy get rid of reason variable
+        if (priority == 9999)
+        {
+            PrintToServer("Reason %s", reason);
+        }
+    }
+
+    public void AimHeadTowardsTarget(int target, int priority, float duration, const char[] reason = "")
     {
         INextBot bot = this.GetBot();
         if (duration <= 0.0)
