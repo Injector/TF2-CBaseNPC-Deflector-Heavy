@@ -14,21 +14,10 @@
     .DefineFloatField("m_flEyePosHeight")
 */
 
-public Action Timer_IntentionDelayedNotice(Handle timer, DataPack pack)
-{
-    pack.Reset();
-    int iBot = EntRefToEntIndex(pack.ReadCell());
-    int iWho = EntRefToEntIndex(pack.ReadCell());
-
-    if (iBot == -1 || iWho == -1)
-        return Plugin_Stop;
-
-    INextBot bot = CBaseEntity(iBot).MyNextBotPointer();
-
-    if (bot.GetVisionInterface().GetKnown(iWho) == NULL_KNOWN_ENTITY)
-        bot.GetVisionInterface().AddKnownEntity(iWho);
-    return Plugin_Stop;
-}
+#define STP_WEAPON_TYPE_ROCKETLAUNCHER  0
+#define STP_WEAPON_TYPE_COMPOUND_BOW    1
+#define STP_WEAPON_TYPE_GRENADELAUNCHER 2
+#define STP_WEAPON_TYPE_SNIPER_RIFLE    3
 
 methodmap CTFBotIntention < IIntention
 {
@@ -83,6 +72,275 @@ methodmap CTFBotIntention < IIntention
         }
 
         return 0.0;
+    }
+
+    //STP_WEAPON_TYPE_ROCKETLAUNCHER STP_WEAPON_TYPE_COMPOUND_BOW STP_WEAPON_TYPE_GRENADELAUNCHER STP_WEAPON_TYPE_SNIPER_RIFLE
+    public void SelectTargetPoint(CKnownEntity threat, int weaponType, float rocketSpeed = 1100.0, float buffer[3])
+    {
+        CBaseEntity ent = CBaseEntity(this.GetBot().GetEntity());
+        CBaseEntity threatEnt = CBaseEntity(threat.GetEntity());
+        INextBot bot = ent.MyNextBotPointer();
+
+        float vecMyPos[3], vecThreatPos[3];
+        ent.GetAbsOrigin(vecMyPos);
+        threatEnt.GetAbsOrigin(vecThreatPos);
+
+        switch (weaponType)
+        {
+            case STP_WEAPON_TYPE_ROCKETLAUNCHER:
+            {
+                if (ent.GetProp(Prop_Data, "m_iSkill") > BOT_SKILL_EASY)
+                {
+                    const float flAboveTolerance = 30.0;
+
+                    ent.GetAbsOrigin(vecMyPos);
+                    threatEnt.GetAbsOrigin(vecThreatPos);
+
+                    if (vecThreatPos[2] - flAboveTolerance > vecMyPos[2])
+                    {
+                        if (bot.GetVisionInterface().IsAbleToSee(vecThreatPos, DISREGARD_FOV))
+                        {
+                            buffer = vecThreatPos;
+                            return;
+                        }
+
+                        //We can't see threat abs origin, use center
+
+                        threatEnt.WorldSpaceCenter(vecThreatPos);
+                        if (bot.GetVisionInterface().IsAbleToSee(vecThreatPos, DISREGARD_FOV))
+                        {
+                            buffer = vecThreatPos;
+                            return;
+                        }
+
+                        //We can get only clients' eye position
+                        if (threat.GetEntity() <= MaxClients)
+                        {
+                            GetClientEyePosition(threat.GetEntity(), vecThreatPos);
+
+                            if (bot.GetVisionInterface().IsAbleToSee(vecThreatPos, DISREGARD_FOV))
+                            {
+                                buffer = vecThreatPos;
+                                return;
+                            }
+                        }
+                    }
+
+                    //Reset just in case
+                    threatEnt.GetAbsOrigin(vecThreatPos);
+
+                    if (threatEnt.GetPropEnt(Prop_Data, "m_hGroundEntity") == -1)
+                    {
+                        float vecUnderTargetFeet[3];
+                        vecUnderTargetFeet = vecThreatPos;
+                        vecUnderTargetFeet[2] = vecThreatPos[2] - 200.0;
+
+                        Handle hTrace = TR_TraceRayFilterEx(vecThreatPos, vecUnderTargetFeet, (MASK_SOLID|CONTENTS_HITBOX), RayType_EndPoint, Filter_WorldOnly, threat.GetEntity());
+                        if (TR_DidHit(hTrace))
+                        {
+                            TR_GetEndPosition(vecThreatPos, hTrace);
+
+                            delete hTrace;
+
+                            buffer = vecThreatPos;
+                            return;
+                        }
+
+                        delete hTrace;
+                    }
+
+                    threatEnt.GetAbsOrigin(vecThreatPos);
+
+                    float vecAbsVelocity[3];
+                    float flDistance = GetVectorDistance(vecThreatPos, vecMyPos);
+
+                    const float flVeryCloseRange = 150.0;
+                    if (flDistance > flVeryCloseRange)
+                    {
+                        threatEnt.GetAbsVelocity(vecAbsVelocity);
+                        float flTimeToTravel = flDistance / rocketSpeed;
+
+                        vecThreatPos[0] += flTimeToTravel * vecAbsVelocity[0];
+                        vecThreatPos[1] += flTimeToTravel * vecAbsVelocity[1];
+                        vecThreatPos[2] += flTimeToTravel * vecAbsVelocity[2];
+
+                        if (bot.GetVisionInterface().IsAbleToSee(vecThreatPos, DISREGARD_FOV))
+                            {
+                                buffer = vecThreatPos;
+                                return;
+                            }
+
+                        if (threat.GetEntity() <= MaxClients)
+                        {
+                            GetClientEyePosition(threat.GetEntity(), vecThreatPos);
+
+                            vecThreatPos[0] += flTimeToTravel * vecAbsVelocity[0];
+                            vecThreatPos[1] += flTimeToTravel * vecAbsVelocity[1];
+                            vecThreatPos[2] += flTimeToTravel * vecAbsVelocity[2];
+
+                            buffer = vecThreatPos;
+                            return;
+                        }
+                    }
+
+                    threatEnt.WorldSpaceCenter(vecThreatPos);
+
+                    buffer = vecThreatPos;
+                    return;
+                }
+            }
+            case STP_WEAPON_TYPE_COMPOUND_BOW:
+            {
+                ent.GetAbsOrigin(vecMyPos);
+                threatEnt.GetAbsOrigin(vecThreatPos);
+                float vecAbsVelocity[3];
+                threatEnt.GetAbsVelocity(vecAbsVelocity);
+                float flDistance = GetVectorDistance(vecThreatPos, vecMyPos);
+
+                const float flVeryCloseRange = 150.0;
+                if (flDistance > flVeryCloseRange)
+                {
+                    float flTimeToTravel = flDistance / rocketSpeed;
+
+                    float vecTargetSpot[3];
+                    threatEnt.WorldSpaceCenter(vecTargetSpot);
+                    if (ent.GetProp(Prop_Data, "m_iSkill") >= BOT_SKILL_HARD)
+                    {
+                        if (threat.GetEntity() <= MaxClients)
+                        {
+                            GetClientEyePosition(threat.GetEntity(), vecTargetSpot);
+                        }
+                    }
+
+                    vecTargetSpot[0] += flTimeToTravel * vecAbsVelocity[0];
+                    vecTargetSpot[1] += flTimeToTravel * vecAbsVelocity[1];
+                    vecTargetSpot[2] += flTimeToTravel * vecAbsVelocity[2];
+
+                    float flElevationAngle = flDistance * 0.01;
+
+                    if (flElevationAngle > 45.0)
+                        flElevationAngle = 45.0;
+
+                    float flS, flC;
+                    SinCos(flElevationAngle * FLOAT_PI / 180.0, flS, flC);
+
+                    if (flC > 0.0)
+                    {
+                        vecTargetSpot[2] += flDistance * flS / flC;
+                        buffer = vecTargetSpot;
+                        return;
+                    }
+
+                    buffer = vecTargetSpot;
+                    return;
+                }
+
+                threatEnt.WorldSpaceCenter(vecThreatPos);
+                buffer = vecThreatPos;
+                return;
+            }
+            case STP_WEAPON_TYPE_SNIPER_RIFLE:
+            {
+                if (ent.HasProp(Prop_Data, "m_flAimAdjustTimer") && ent.HasProp(Prop_Data, "m_flAimErrorAngle") && ent.HasProp(Prop_Data, "m_flAimErrorRadius"))
+                {
+                    if (GetGameTime() >= ent.GetPropFloat(Prop_Data, "m_flAimAdjustTimer"))
+                    {
+                        ent.SetPropFloat(Prop_Data, "m_flAimAdjustTimer", GetRandomFloat(0.5, 1.5));
+
+                        ent.SetPropFloat(Prop_Data, "m_flAimErrorAngle", GetRandomFloat(-FLOAT_PI, FLOAT_PI));
+                        ent.SetPropFloat(Prop_Data, "m_flAimErrorRadius", GetRandomFloat(0.0, 0.01));
+                    }
+                }
+
+                ent.GetAbsOrigin(vecMyPos);
+                threatEnt.GetAbsOrigin(vecThreatPos);
+                float vecAbsVelocity[3];
+                threatEnt.GetAbsVelocity(vecAbsVelocity);
+                float vecTo[3];
+                SubtractVectors(vecThreatPos, vecMyPos, vecTo);
+                float flDistance = NormalizeVector(vecTo, vecTo);
+
+                float flS1, flC1;
+                SinCos(ent.GetPropFloat(Prop_Data, "m_flAimErrorRadius"), flS1, flC1);
+
+                float flError = flDistance * flS1;
+
+                float vecUp[3], vecSide[3];
+                vecUp[2] = 1.0;
+
+                GetVectorCrossProduct(vecTo, vecUp, vecSide);
+
+                float flS, flC;
+                SinCos(ent.GetPropFloat(Prop_Data, "m_flAimErrorAngle"), flS, flC);
+
+                float vecDesiredAimSpot[3];
+                threatEnt.WorldSpaceCenter(vecDesiredAimSpot);
+
+                switch (ent.GetProp(Prop_Data, "m_iSkill"))
+                {
+                    case BOT_SKILL_HARD, BOT_SKILL_EXPERT:
+                    {
+                        if (threat.GetEntity() <= MaxClients)
+                        {
+                            GetClientEyePosition(threat.GetEntity(), vecThreatPos);
+                        }
+                    }
+                    case BOT_SKILL_NORMAL:
+                    {
+                        if (threat.GetEntity() <= MaxClients)
+                        {
+                            float vecThreatEyePosition[3], vecThreatCenter[3];
+                            GetClientEyePosition(threat.GetEntity(), vecThreatEyePosition);
+                            threatEnt.WorldSpaceCenter(vecThreatCenter);
+
+                            vecDesiredAimSpot[0] = vecThreatEyePosition[0] + vecThreatEyePosition[0] + vecThreatCenter[0] / 3.0;
+                            vecDesiredAimSpot[1] = vecThreatEyePosition[1] + vecThreatEyePosition[1] + vecThreatCenter[1] / 3.0;
+                            vecDesiredAimSpot[2] = vecThreatEyePosition[2] + vecThreatEyePosition[2] + vecThreatCenter[2] / 3.0;
+                        }
+                    }
+                }
+
+                float vecImperfectAimSpot[3];
+                vecImperfectAimSpot[0] = vecDesiredAimSpot[0] + flError * flS * vecUp[0] + flError * flC * vecSide[0];
+                vecImperfectAimSpot[1] = vecDesiredAimSpot[1] + flError * flS * vecUp[1] + flError * flC * vecSide[1];
+                vecImperfectAimSpot[2] = vecDesiredAimSpot[2] + flError * flS * vecUp[2] + flError * flC * vecSide[2];
+
+                buffer = vecImperfectAimSpot;
+                return;
+            }
+            case STP_WEAPON_TYPE_GRENADELAUNCHER:
+            {
+                //TODO: add rocketSpeed
+                //TODO: or add to STP_WEAPON_TYPE_COMPOUND_BOW
+
+                ent.GetAbsOrigin(vecMyPos);
+                threatEnt.GetAbsOrigin(vecThreatPos);
+                float vecTo[3];
+                SubtractVectors(vecThreatPos, vecMyPos, vecTo);
+                float flThreatRange = NormalizeVector(vecTo, vecTo);
+                float flElevationAngle = flThreatRange * 0.01;
+
+                if (flElevationAngle > 45.0)
+                    flElevationAngle = 45.0;
+
+                float flS, flC;
+                SinCos(flElevationAngle * FLOAT_PI / 180.0, flS, flC);
+
+                if (flC > 0.0)
+                {
+                    float flElevation = flThreatRange * flS / flC;
+
+                    threatEnt.WorldSpaceCenter(vecThreatPos);
+                    vecThreatPos[2] += flElevation;
+
+                    buffer = vecThreatPos;
+                    return;
+                }
+            }
+        }
+
+        threatEnt.WorldSpaceCenter(vecThreatPos);
+        buffer = vecThreatPos;
     }
 
     public void SelectTargetPointRocketLauncher(CKnownEntity threat, float muzzlePos[3] = NULL_VECTOR, float rocketSpeed = 1100.0, float buffer[3])
@@ -337,21 +595,53 @@ methodmap CTFBotIntention < IIntention
         GetEntPropVector(threat.GetEntity(), Prop_Data, "m_vecOrigin", vecLastKnownPos);
 
         GetEntPropVector(me.GetEntity(), Prop_Send, "m_vecOrigin", vecMyPos);
-        if (GetVectorDistance(vecMyPos, vecLastKnownPos) < 500.0)
+
+        float vecTo[3];
+        SubtractVectors(vecMyPos, vecLastKnownPos, vecTo);
+        float flThreatRange = NormalizeVector(vecTo, vecTo);
+
+        if (flThreatRange < 500.0)
         {
+            // very near threats are always immediately dangerous
             return true;
         }
+
+        // mid-to-far away threats
 
         if (this.IsThreatFiringAtMe(threat.GetEntity()))
         {
+            // distant threat firing on me - an immediate threat whether in my FOV or not
             return true;
         }
 
-        //TODO: Add sniper check
+        //There is should be sentry check based on their 'setnry' angles, but there is no way to get GetTurretAngles(), only via sdkcalls
 
-        if (bNormalDiff && bIsPlayer && (TF2_GetPlayerClass(iThreatEnt) == TFClass_Engineer || TF2_GetPlayerClass(iThreatEnt) == TFClass_Medic))
+        // does a sniper have a shot on me?
+        if (bIsPlayer && TF2_GetPlayerClass(iThreatEnt) == TFClass_Sniper)
         {
-            return true;
+            float vecForward[3], angEye[3];
+            GetClientEyeAngles(iThreatEnt, angEye);
+            GetAngleVectors(angEye, vecForward, NULL_VECTOR, NULL_VECTOR);
+
+            if (GetVectorDotProduct(vecTo, vecForward) > 0.0)
+            {
+                return true;
+            }
+            return false;
+        }
+
+        if (bNormalDiff && bIsPlayer)
+        {
+            if (TF2_GetPlayerClass(iThreatEnt) == TFClass_Medic)
+            {
+                // always try to kill these guys first
+                return true;
+            }
+            if (TF2_GetPlayerClass(iThreatEnt) == TFClass_Engineer)
+            {
+                // take out engineers to let the team kill their sentry nests
+                return true;
+            }
         }
 
         return false;
@@ -641,12 +931,57 @@ methodmap CTFBotIntention < IIntention
         return true;
     }
 
-    //TODO: Make something else instead of CreateTimer
-    public void DelayedThreatNotice(int who, float time)
+    public void DelayedThreatNotice(int who, float noticeDelay)
     {
-        DataPack pack;
-        CreateDataTimer(time, Timer_IntentionDelayedNotice, pack, TIMER_FLAG_NO_MAPCHANGE);
-        pack.WriteCell(EntIndexToEntRef(this.GetBot().GetEntity()));
-        pack.WriteCell(EntIndexToEntRef(who));
+        CBaseEntity ent = CBaseEntity(this.GetBot().GetEntity());
+        float when = GetGameTime() + noticeDelay;
+
+        if (!ent.HasProp(Prop_Data, "m_flDelayedNoticeWhen") || !ent.HasProp(Prop_Data, "m_hDelayedNoticeWho"))
+            return;
+
+        //If we defined already, ignore
+        for (int i = 0; i < 32; i++)
+        {
+            if (ent.GetPropEnt(Prop_Data, "m_hDelayedNoticeWho", i) == who)
+            {
+                if (ent.GetPropFloat(Prop_Data, "m_flDelayedNoticeWhen", i) > when)
+                {
+                    ent.SetPropFloat(Prop_Data, "m_flDelayedNoticeWhen", when, i);
+                }
+                return;
+            }
+
+            if (ent.GetPropFloat(Prop_Data, "m_flDelayedNoticeWhen", i) > 0.0)
+                continue;
+
+            ent.SetPropFloat(Prop_Data, "m_flDelayedNoticeWhen", when, i);
+            ent.SetPropEnt(Prop_Data, "m_hDelayedNoticeWho", who, i);
+        }
+    }
+
+    public void UpdateDelayedThreatNotices()
+    {
+        CBaseEntity ent = CBaseEntity(this.GetBot().GetEntity());
+
+        if (!ent.HasProp(Prop_Data, "m_flDelayedNoticeWhen") || !ent.HasProp(Prop_Data, "m_hDelayedNoticeWho"))
+            return;
+
+        for (int i = 0; i < 32; i++)
+        {
+            if (ent.GetPropFloat(Prop_Data, "m_flDelayedNoticeWhen", i) > 0.0)
+            {
+                if (GetGameTime() >= ent.GetPropFloat(Prop_Data, "m_flDelayedNoticeWhen", i))
+                {
+                    int iWho = ent.GetPropEnt(Prop_Data, "m_hDelayedNoticeWho", i);
+                    if (iWho != -1)
+                    {
+                        this.GetBot().GetVisionInterface().AddKnownEntity(iWho);
+                    }
+
+                    ent.SetPropFloat(Prop_Data, "m_flDelayedNoticeWhen", 0.0, i);
+                    ent.SetPropEnt(Prop_Data, "m_hDelayedNoticeWho", -1, i);
+                }
+            }
+        }
     }
 }

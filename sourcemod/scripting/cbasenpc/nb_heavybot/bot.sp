@@ -40,9 +40,412 @@ bool g_bBackstabEnabled = false;
 float g_flBackstabDamage = 450.0;
 float g_flBackstabDelay = 1.5;
 
+bool g_bSpyMemoryEnabled = false;
+float g_flSpyCloakedTime[MAXPLAYERS + 1];
+bool g_bSpyDisguiseEnabled = false;
+
 //bool g_bDebugLookAt;
 
-//TODO: Refactor code
+methodmap CBot
+{
+    public static void AddFakeClient()
+    {
+        if (GetClientOfUserId(g_iFakeClientUserId) <= 0)
+		{
+            if (g_szFakeClientName[0] == '\0')
+                g_szFakeClientName = "Bot";
+			int iBot = CreateFakeClient(g_szFakeClientName);
+			if (iBot > 0)
+			{
+				g_iFakeClientUserId = GetClientUserId(iBot);
+				SDKHook(iBot, SDKHook_OnTakeDamage, FakeClient_OnTakeDamage);
+            }
+            g_flLastChangedTime = 0.0;
+            g_iAmountOfTriesToChangeTeam = 0;
+		}
+    }
+
+    public static void RemoveFakeClient()
+    {
+        if (GetClientOfUserId(g_iFakeClientUserId) > 0)
+        {
+            KickClient(GetClientOfUserId(g_iFakeClientUserId));
+            g_flLastChangedTime = 0.0;
+            g_iAmountOfTriesToChangeTeam = 0;
+        }
+    }
+
+    public static void ClearFakeClientLoadout(int client)
+    {
+        SetEntProp(client, Prop_Send, "m_fEffects", 32);
+
+        for (int i = 0; i < 7; i++)
+        {
+            //Using m_hMyWeapons to remove special item (grappling hook, etc)
+            int iWeapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
+            if (iWeapon > 0)
+            {
+                int iWearable = GetEntPropEnt(iWeapon, Prop_Send, "m_hExtraWearable");
+                if (iWearable != -1)
+                {
+                    TF2_RemoveWearable(client, iWearable);
+                }
+                iWearable = GetEntPropEnt(iWeapon, Prop_Send, "m_hExtraWearableViewModel");
+                if (iWearable != -1)
+                {
+                    TF2_RemoveWearable(client, iWearable);
+                }
+                RemovePlayerItem(client, iWeapon);
+                AcceptEntityInput(iWeapon, "Kill");
+            }
+        }
+    }
+
+    //If a fake client changed his team (usually unassigned) to a different one and g_iFakeClientTeamMode == FAKECLIENT_TEAM_MODE_ONLY_WHITE, switch back to unassigned team
+    public static void EventPlayerTeam(int client, int team)
+    {
+        if (GetClientOfUserId(g_iFakeClientUserId) != client)
+            return;
+
+        if (g_iFakeClientTeamMode != FAKECLIENT_TEAM_MODE_ONLY_WHITE)
+            return;
+
+        int iCurrentTeam = GetClientTeam(client);
+        int iNewTeam = team;
+
+        //Reset num of tries since we joined unassigned team back
+        if (iNewTeam < 2)
+        {
+            g_iAmountOfTriesToChangeTeam = 0;
+        }
+
+        //We are in unassigned team and some plugin tries to change our team
+        if (iCurrentTeam < 2)
+        {
+            if (team > 1)
+            {
+                float flTime = GetGameTime() - g_flLastChangedTime;
+                if (g_iAmountOfTriesToChangeTeam != 0)
+                {
+                    //Added check to make sure to prevent infinite loop somehow (by third plugins)
+                    if (flTime == 0.0 || flTime > 0.0 && flTime <= 0.2)
+                        return;
+                }
+
+                RequestFrame(ReqFrameChangeTeam, g_iFakeClientUserId);
+                g_iAmountOfTriesToChangeTeam++;
+                g_flLastChangedTime = GetGameTime();
+            }
+        }
+    }
+
+    //I think you would like to create your custom Event_ hook and just call it from CBot.Event_NPCHurt()
+    //If when you need multiple names for same nextbot class, you can do like this
+    //
+    //Format(g_szFakeClientName, sizeof(g_szFakeClientName), "%s", "my new nextbot name");
+    //CBot.Event_NPCHurt(event);
+    //
+    //
+    //(Event event, const char[] name, bool dontBroadcast)
+    public static void EventNPCHurt(Event event)
+    {
+        char szWeapon[64];
+        int iEnt = event.GetInt("entindex");
+        int iHealth = event.GetInt("health");
+        int iAttacker = GetClientOfUserId(event.GetInt("attacker_player"));
+        int iDeathFlags = event.GetInt("death_flags");
+        event.GetString("weapon", szWeapon, sizeof(szWeapon));
+
+        if (iEnt > 0 && iHealth == 0)
+        {
+            char szClassName[64];
+            GetEntityClassname(iEnt, szClassName, sizeof(szClassName));
+
+            if (StrEqual(szClassName, NEXTBOT_CUSTOM_CLASS_NAME) && iAttacker > 0 && iAttacker <= MaxClients)
+            {
+                int iRosguardClient = GetClientOfUserId(g_iFakeClientUserId);
+
+                if (g_szFakeClientName[0] != '\0' && iRosguardClient > 0)
+                {
+                    //Use m_szNetname and info to bypass sv_namechange_cooldown_seconds I think
+                    SetEntPropString(iRosguardClient, Prop_Data, "m_szNetname", g_szFakeClientName);
+                    SetClientInfo(iRosguardClient, "name", g_szFakeClientName);
+
+                    //Wait 1 frame to make sure that our name is correctly changed
+                    DataPack pack = new DataPack();
+                    pack.WriteCell(iRosguardClient);
+                    pack.WriteCell(GetClientUserId(iAttacker));
+                    pack.WriteCell(iDeathFlags);
+                    pack.WriteString(szWeapon);
+                    RequestFrame(ReqFrameCreateEvent, pack);
+                }
+            }
+        }
+    }
+
+    public static void EventPlayerDeath(Event event, const char[] weapon, int deathFlags = 0, int critType = 0)
+    {
+        int iInflictor = event.GetInt("inflictor_entindex");
+
+        if (iInflictor > 0)
+        {
+            int iEnt = -1;
+            while ((iEnt = FindEntityByClassname(iEnt, NEXTBOT_CUSTOM_CLASS_NAME)) != INVALID_ENT_REFERENCE)
+            {
+                if (iEnt == iInflictor)
+                {
+                    int iTarget = GetClientOfUserId(g_iFakeClientUserId);
+                    if (iTarget > 0)
+                    {
+                        if (g_szFakeClientName[0] != '\0')
+                        {
+                            //Use m_szNetname and info to bypass sv_namechange_cooldown_seconds I think
+                            SetEntPropString(iTarget, Prop_Data, "m_szNetname", g_szFakeClientName);
+                            SetClientInfo(iTarget, "name", g_szFakeClientName);
+                        }
+
+                        if (g_iFakeClientTeamMode == FAKECLIENT_TEAM_MODE_ALL_TEAMS && GetEntProp(iEnt, Prop_Send, "m_iTeamNum") <= 3)
+                        {
+                            //Switch our class to unassigned, so we don't receive 'bid farewell, cruel world!' and prevent us from spawning to avoid break custom gamemodes which relies on alive players?
+                            SetEntProp(iTarget, Prop_Send, "m_iDesiredPlayerClass", 0);
+                            SetEntProp(iTarget, Prop_Send, "m_iClass", 0);
+                            ChangeClientTeam(iTarget, GetEntProp(iEnt, Prop_Send, "m_iTeamNum"));
+                        }
+
+                        event.SetString("assister_fallback", "");
+                        event.SetInt("attacker", GetClientUserId(iTarget));
+                        event.SetString("weapon", weapon);
+                        event.SetString("weapon_logclassname", weapon);
+                        event.SetInt("death_flags", deathFlags);
+                        event.SetInt("crit_type", critType);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Call it in OnEntityCreated
+    //TODO: Add custom vecmins and vecmaxs in function
+    public static void FixHitbox(int entity)
+    {
+        SDKHook(entity, SDKHook_SpawnPost, NextBot_SpawnPostFixHitbox);
+    }
+
+    //TODO: Move to CBotConfig
+
+    //Call it in TF2_CalcIsAttackCritical
+    public static void HandleBackstabLogic(int client, int weapon)
+    {
+        if (!g_bBackstabEnabled || !IsValidEntity(weapon) || !HasEntProp(weapon, Prop_Send, "m_bReadyToBackstab"))
+            return;
+
+        int iTarget = Backstab_DoSwingTrace(client);
+
+        //PrintToChatAll("Target %i", iTarget);
+
+        if (iTarget <= 0)
+            return;
+
+        if (GetEntProp(iTarget, Prop_Send, "m_iTeamNum") == GetClientTeam(client))
+            return;
+
+        if (!Backstab_IsBehindMe(client, iTarget))
+            return;
+
+        //PrintToChatAll("Backstab test");
+
+        SetEntProp(weapon, Prop_Send, "m_bReadyToBackstab", 1);
+    }
+
+    //Call it in TF2_OnConditionAdded
+    public static void HandleOnConditionAdded(int client, TFCond cond)
+    {
+        if (g_bSpyMemoryEnabled)
+        {
+            if (cond == TFCond_Cloaked)
+            {
+                g_flSpyCloakedTime[client] = GetGameTime();
+            }
+        }
+    }
+
+    //Call it in SDKHook Think()
+    public static void HandleSpyMemoryLogic(int entity)
+    {
+        if (!g_bSpyMemoryEnabled)
+            return;
+
+        INextBot bot = CBaseEntity(entity).MyNextBotPointer();
+
+        for (int i = 1; i <= MaxClients; i++)
+        {
+            if (!IsClientInGame(i))
+                continue;
+
+            if (TF2_IsPlayerInCondition(i, TFCond_Cloaked))
+            {
+                //Bot will forget abount invisible spy in 3 seconds
+                if (GetGameTime() - g_flSpyCloakedTime[i] > 3.0)
+                {
+                    bot.GetVisionInterface().ForgetEntity(i);
+                }
+            }
+        }
+    }
+
+    //TODO: Move is cloaked here
+    public static bool IgnoreSpy(int bot, int client)
+    {
+        if (!g_bSpyDisguiseEnabled)
+            return false;
+
+        float vecBotPos[3], vecSpyPos[3];
+        GetEntPropVector(bot, Prop_Send, "m_vecOrigin", vecBotPos);
+        GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecSpyPos);
+
+        // unless a spy is very near us (I don't think that OnContact callback is working with clients)
+        if (GetVectorDistance(vecBotPos, vecSpyPos) <= 80.0)
+        {
+            return false;
+        }
+
+        return TF2_IsPlayerInCondition(client, TFCond_Disguised) && GetEntProp(client, Prop_Send, "m_nDisguiseClass") > 0 && GetEntProp(client, Prop_Send, "m_nDisguiseTeam") == GetEntProp(bot, Prop_Send, "m_iTeamNum");
+    }
+
+    public static void AddHookSniperHeadshot(int entity)
+    {
+        SDKHook(entity, SDKHook_TraceAttack, NextBot_TraceAttackHeadshot);
+    }
+
+    public static void AddHookSpyBackstab(int entity)
+    {
+        SDKHook(entity, SDKHook_OnTakeDamage, NextBot_OnTakeDamageBackstab);
+    }
+}
+
+/* Handle g_hAimTrackTimer;
+
+public Action Timer_HandleAimUpkeep(Handle timer)
+{
+    int iEnt = -1;
+    while ((iEnt = FindEntityByClassname(iEnt, NEXTBOT_CUSTOM_CLASS_NAME)) != INVALID_ENT_REFERENCE)
+    {
+        INextBot bot = CBaseEntity(iEnt).MyNextBotPointer();
+        CTFBotBody(bot.GetBodyInterface()).Upkeep();
+    }
+    return Plugin_Continue;
+}
+
+//Using a single global timer to handle every nextbot upkeep. Because a lot of timers (1 timer per nextbot) can affect server performance
+//TODO: Bullshit, timer makes things worse, need to use think hook with dummy base_boss instead
+methodmap CBotAimTrackingManager
+{
+    public static void StartTimer()
+    {
+        if (g_hAimTrackTimer)
+        {
+            delete g_hAimTrackTimer;
+        }
+        //g_hAimTrackTimer = CreateTimer(0.001, Timer_HandleAimUpkeep, _, TIMER_REPEAT);
+    }
+
+    public static void EndTimer()
+    {
+        if (g_hAimTrackTimer)
+            delete g_hAimTrackTimer;
+    }
+} */
+
+methodmap CBotConfig
+{
+    //Call it in OnPluginStart
+    //Nextbot will receive backstab damage
+    public static void AddSpyBackstabSupport()
+    {
+        g_bBackstabEnabled = true;
+    }
+
+    //Call it in OnPluginStart
+    //Nextbot will ignore cloaked spies. If a spy go to into cloak mode, nextbot will remember them for 3 seconds
+    //TODO: Rename to AddSpyCloakSupport?
+    public static void AddSpyMemorySupport()
+    {
+        g_bSpyMemoryEnabled = true;
+    }
+
+    //Call it in OnPluginStart
+    //Nextbot will ignore disguised spies, if a diguised target in same team as nextbot
+    public static void AddSpyDisguiseSupport()
+    {
+        g_bSpyDisguiseEnabled = true;
+    }
+}
+
+methodmap CBotBossHealthbarMonoculus
+{
+    //TODO:
+}
+
+methodmap CBotBossHealthbar
+{
+    public static void SetBoss(int ent)
+    {
+        if (g_hBossHealthbarUpdate != null)
+        {
+            delete g_hBossHealthbarUpdate;
+        }
+
+        g_iBossHealthbarTargetRef = EntIndexToEntRef(ent);
+
+        //If we set TIMER_FLAG_NO_MAPCHANGE, then we need to clear g_hBossHealthbarUpdate = null, but what if a developer forgets to clear g_hBossHealthbarUpdate in OnMapEnd? Timer will be automatically removed
+        g_hBossHealthbarUpdate = CreateTimer(0.2, Timer_BossHealthbarHUD, _, TIMER_REPEAT);
+    }
+
+    public static void Cleanup()
+    {
+        if (g_hBossHealthbarUpdate != null)
+        {
+            delete g_hBossHealthbarUpdate;
+        }
+    }
+
+    public static void SetBossName(char[] name)
+    {
+        Format(g_szBossHealthbarName, sizeof(g_szBossHealthbarName), "%s", name);
+    }
+}
+
+methodmap CBotDebug < INextBot
+{
+    public CBotDebug(INextBot bot)
+    {
+        return view_as<CBotDebug>(bot);
+    }
+
+    public void DebugLookAt()
+    {
+        float vecEyePos[3], angEyes[3];
+        CBaseEntity ent = CBaseEntity(this.GetEntity());
+        ent.GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
+        CBotBody(this.GetBodyInterface()).GetEyePositionEx(vecEyePos);
+
+        float vecForward[3], vecDir[3];
+        GetAngleVectors(angEyes, vecForward, NULL_VECTOR, NULL_VECTOR);
+
+        vecDir[0] = vecEyePos[0] + (500.0 * vecForward[0]);
+        vecDir[1] = vecEyePos[1] + (500.0 * vecForward[1]);
+        vecDir[2] = vecEyePos[2] + (500.0 * vecForward[2]);
+
+        int iColour2[4];
+        iColour2[0] = 0;
+        iColour2[1] = 0;
+        iColour2[2] = 255;
+        iColour2[3] = 255;
+
+        TE_SetupBeamPoints(vecEyePos, vecDir, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
+        TE_SendToAll();
+    }
+}
 
 stock void ReqFrameCreateEvent(DataPack pack)
 {
@@ -60,6 +463,7 @@ stock void ReqFrameCreateEvent(DataPack pack)
     newEvent.SetInt("userid", g_iFakeClientUserId);
     newEvent.SetInt("attacker", iAttackerUserId);
     newEvent.SetString("weapon", szWeapon);
+    newEvent.SetString("weapon_logclassname", szWeapon);
     newEvent.SetInt("death_flags", iDeathFlags);
     newEvent.Fire();
 }
@@ -318,13 +722,29 @@ public Action Timer_BossHealthbarHUD(Handle timer)
         Format(szHealthbarRes, sizeof(szHealthbarRes), "%s (%.0f%%%%)", szHealthbarRes, flPercent);
     }
 
+    #if defined GAME_LINUX_LOADED
+    bool bIsLinuxPlayer = false;
+    char szHealthbarResLinux[128];
+    szHealthbarResLinux = szHealthbarRes;
+    ReplaceString(szHealthbarResLinux, sizeof(szHealthbarResLinux), "█", "#", false);
+    ReplaceString(szHealthbarResLinux, sizeof(szHealthbarResLinux), "░", "_", false);
+    #endif
+
     for (int i = 1; i <= MaxClients; i++)
     {
         if (!IsClientInGame(i))
             continue;
 
+        #if defined GAME_LINUX_LOADED
+        bIsLinuxPlayer = CGameLinux.IsLinuxPlayer(i);
+        #endif
+
         SetHudTextParams(-1.0, 0.12, 0.25, r, g, b, 255);
+        #if defined GAME_LINUX_LOADED
+        ShowSyncHudText(i, g_hBosshealthbarHud, bIsLinuxPlayer ? szHealthbarResLinux : szHealthbarRes);
+        #else
         ShowSyncHudText(i, g_hBosshealthbarHud, szHealthbarRes);
+        #endif
     }
     return Plugin_Continue;
 }
@@ -343,290 +763,4 @@ stock void HealthBarFill(float percent, char[] buffer, int maxlen)
     //For linux: "#" : "_"
     for (int i = 0; i < iTotal; i++)
         StrCat(buffer, maxlen, (i < iFilled) ? "█" : "░");
-}
-
-methodmap CBot
-{
-    public static void AddFakeClient()
-    {
-        if (GetClientOfUserId(g_iFakeClientUserId) <= 0)
-		{
-            if (g_szFakeClientName[0] == '\0')
-                g_szFakeClientName = "Bot";
-			int iBot = CreateFakeClient(g_szFakeClientName);
-			if (iBot > 0)
-			{
-				g_iFakeClientUserId = GetClientUserId(iBot);
-				SDKHook(iBot, SDKHook_OnTakeDamage, FakeClient_OnTakeDamage);
-            }
-            g_flLastChangedTime = 0.0;
-            g_iAmountOfTriesToChangeTeam = 0;
-		}
-    }
-
-    public static void RemoveFakeClient()
-    {
-        if (GetClientOfUserId(g_iFakeClientUserId) > 0)
-        {
-            KickClient(GetClientOfUserId(g_iFakeClientUserId));
-            g_flLastChangedTime = 0.0;
-            g_iAmountOfTriesToChangeTeam = 0;
-        }
-    }
-
-    public static void ClearFakeClientLoadout(int client)
-    {
-        SetEntProp(client, Prop_Send, "m_fEffects", 32);
-
-        for (int i = 0; i < 7; i++)
-        {
-            //Using m_hMyWeapons to remove special item (grappling hook, etc)
-            int iWeapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
-            if (iWeapon > 0)
-            {
-                int iWearable = GetEntPropEnt(iWeapon, Prop_Send, "m_hExtraWearable");
-                if (iWearable != -1)
-                {
-                    TF2_RemoveWearable(client, iWearable);
-                }
-                iWearable = GetEntPropEnt(iWeapon, Prop_Send, "m_hExtraWearableViewModel");
-                if (iWearable != -1)
-                {
-                    TF2_RemoveWearable(client, iWearable);
-                }
-                RemovePlayerItem(client, iWeapon);
-                AcceptEntityInput(iWeapon, "Kill");
-            }
-        }
-    }
-
-    //If a fake client changed his team (usually unassigned) to a different one and g_iFakeClientTeamMode == FAKECLIENT_TEAM_MODE_ONLY_WHITE, switch back to unassigned team
-    public static void EventPlayerTeam(int client, int team)
-    {
-        if (GetClientOfUserId(g_iFakeClientUserId) != client)
-            return;
-
-        if (g_iFakeClientTeamMode != FAKECLIENT_TEAM_MODE_ONLY_WHITE)
-            return;
-
-        int iCurrentTeam = GetClientTeam(client);
-        int iNewTeam = team;
-
-        //Reset num of tries since we joined unassigned team back
-        if (iNewTeam < 2)
-        {
-            g_iAmountOfTriesToChangeTeam = 0;
-        }
-
-        //We are in unassigned team and some plugin tries to change our team
-        if (iCurrentTeam < 2)
-        {
-            if (team > 1)
-            {
-                float flTime = GetGameTime() - g_flLastChangedTime;
-                if (g_iAmountOfTriesToChangeTeam != 0)
-                {
-                    //Added check to make sure to prevent infinite loop somehow (by third plugins)
-                    if (flTime == 0.0 || flTime > 0.0 && flTime <= 0.2)
-                        return;
-                }
-
-                RequestFrame(ReqFrameChangeTeam, g_iFakeClientUserId);
-                g_iAmountOfTriesToChangeTeam++;
-                g_flLastChangedTime = GetGameTime();
-            }
-        }
-    }
-
-    //I think you would like to create your custom Event_ hook and just call it from CBot.Event_NPCHurt()
-    //If when you need multiple names for same nextbot class, you can do like this
-    //
-    //Format(g_szFakeClientName, sizeof(g_szFakeClientName), "%s", "my new nextbot name");
-    //CBot.Event_NPCHurt(event);
-    //
-    //
-    //(Event event, const char[] name, bool dontBroadcast)
-    public static void EventNPCHurt(Event event)
-    {
-        char szWeapon[64];
-        int iEnt = event.GetInt("entindex");
-        int iHealth = event.GetInt("health");
-        int iAttacker = GetClientOfUserId(event.GetInt("attacker_player"));
-        int iDeathFlags = event.GetInt("death_flags");
-        event.GetString("weapon", szWeapon, sizeof(szWeapon));
-
-        if (iEnt > 0 && iHealth == 0)
-        {
-            char szClassName[64];
-            GetEntityClassname(iEnt, szClassName, sizeof(szClassName));
-
-            if (StrEqual(szClassName, NEXTBOT_CUSTOM_CLASS_NAME) && iAttacker > 0 && iAttacker <= MaxClients)
-            {
-                int iRosguardClient = GetClientOfUserId(g_iFakeClientUserId);
-
-                if (g_szFakeClientName[0] != '\0' && iRosguardClient > 0)
-                {
-                    //Use m_szNetname and info to bypass sv_namechange_cooldown_seconds I think
-                    SetEntPropString(iRosguardClient, Prop_Data, "m_szNetname", g_szFakeClientName);
-                    SetClientInfo(iRosguardClient, "name", g_szFakeClientName);
-
-                    //Wait 1 frame to make sure that our name is correctly changed
-                    DataPack pack = new DataPack();
-                    pack.WriteCell(iRosguardClient);
-                    pack.WriteCell(GetClientUserId(iAttacker));
-                    pack.WriteCell(iDeathFlags);
-                    pack.WriteString(szWeapon);
-                    RequestFrame(ReqFrameCreateEvent, pack);
-                }
-            }
-        }
-    }
-
-    public static void EventPlayerDeath(Event event, const char[] weapon, int deathFlags)
-    {
-        int iInflictor = event.GetInt("inflictor_entindex");
-
-        if (iInflictor > 0)
-        {
-            int iEnt = -1;
-            while ((iEnt = FindEntityByClassname(iEnt, NEXTBOT_CUSTOM_CLASS_NAME)) != INVALID_ENT_REFERENCE)
-            {
-                if (iEnt == iInflictor)
-                {
-                    int iTarget = GetClientOfUserId(g_iFakeClientUserId);
-                    if (iTarget > 0)
-                    {
-                        if (g_szFakeClientName[0] != '\0')
-                        {
-                            //Use m_szNetname and info to bypass sv_namechange_cooldown_seconds I think
-                            SetEntPropString(iTarget, Prop_Data, "m_szNetname", g_szFakeClientName);
-                            SetClientInfo(iTarget, "name", g_szFakeClientName);
-                        }
-
-                        if (g_iFakeClientTeamMode == FAKECLIENT_TEAM_MODE_ALL_TEAMS && GetEntProp(iEnt, Prop_Send, "m_iTeamNum") <= 3)
-                        {
-                            //Switch our class to unassigned, so we don't receive 'bid farewell, cruel world!' and prevent us from spawning to avoid break custom gamemodes which relies on alive players?
-                            SetEntProp(iTarget, Prop_Send, "m_iDesiredPlayerClass", 0);
-                            SetEntProp(iTarget, Prop_Send, "m_iClass", 0);
-                            ChangeClientTeam(iTarget, GetEntProp(iEnt, Prop_Send, "m_iTeamNum"));
-                        }
-
-                        event.SetString("assister_fallback", "");
-                        event.SetInt("attacker", GetClientUserId(iTarget));
-                        event.SetString("weapon", weapon);
-                        event.SetString("weapon_logclassname", weapon);
-                        event.SetInt("death_flags", deathFlags);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Call it in OnEntityCreated
-    //TODO: Add custom vecmins and vecmaxs in function
-    public static void FixHitbox(int entity)
-    {
-        SDKHook(entity, SDKHook_SpawnPost, NextBot_SpawnPostFixHitbox);
-    }
-
-    public static void AddSniperHeadshotSupport(int entity)
-    {
-        SDKHook(entity, SDKHook_TraceAttack, NextBot_TraceAttackHeadshot);
-    }
-
-    public static void AddSpyBackstabSupport(int entity)
-    {
-        SDKHook(entity, SDKHook_OnTakeDamage, NextBot_OnTakeDamageBackstab);
-        g_bBackstabEnabled = true;
-    }
-
-    //Call it in TF2_CalcIsAttackCritical
-    public static void HandleBackstabLogic(int client, int weapon)
-    {
-        if (!g_bBackstabEnabled || !IsValidEntity(weapon) || !HasEntProp(weapon, Prop_Send, "m_bReadyToBackstab"))
-            return;
-
-        int iTarget = Backstab_DoSwingTrace(client);
-
-        //PrintToChatAll("Target %i", iTarget);
-
-        if (iTarget <= 0)
-            return;
-
-        if (GetEntProp(iTarget, Prop_Send, "m_iTeamNum") == GetClientTeam(client))
-            return;
-
-        if (!Backstab_IsBehindMe(client, iTarget))
-            return;
-
-        //PrintToChatAll("Backstab test");
-
-        SetEntProp(weapon, Prop_Send, "m_bReadyToBackstab", 1);
-    }
-}
-
-methodmap CBotBossHealthbarMonoculus
-{
-    //TODO:
-}
-
-methodmap CBotBossHealthbar
-{
-    public static void SetBoss(int ent)
-    {
-        if (g_hBossHealthbarUpdate != null)
-        {
-            delete g_hBossHealthbarUpdate;
-        }
-
-        g_iBossHealthbarTargetRef = EntIndexToEntRef(ent);
-
-        //If we set TIMER_FLAG_NO_MAPCHANGE, then we need to clear g_hBossHealthbarUpdate = null, but what if a developer forgets to clear g_hBossHealthbarUpdate in OnMapEnd?
-        g_hBossHealthbarUpdate = CreateTimer(0.2, Timer_BossHealthbarHUD, _, TIMER_REPEAT);
-    }
-
-    public static void Cleanup()
-    {
-        if (g_hBossHealthbarUpdate != null)
-        {
-            delete g_hBossHealthbarUpdate;
-        }
-    }
-
-    public static void SetBossName(char[] name)
-    {
-        Format(g_szBossHealthbarName, sizeof(g_szBossHealthbarName), "%s", name);
-    }
-}
-
-methodmap CBotDebug < INextBot
-{
-    public CBotDebug(INextBot bot)
-    {
-        return view_as<CBotDebug>(bot);
-    }
-
-    public void DebugLookAt()
-    {
-        float vecEyePos[3], angEyes[3];
-        CBaseEntity ent = CBaseEntity(this.GetEntity());
-        ent.GetPropVector(Prop_Data, "m_angCurrentAngles", angEyes);
-        CBotBody(this.GetBodyInterface()).GetEyePositionEx(vecEyePos);
-
-        float vecForward[3], vecDir[3];
-        GetAngleVectors(angEyes, vecForward, NULL_VECTOR, NULL_VECTOR);
-
-        vecDir[0] = vecEyePos[0] + (500.0 * vecForward[0]);
-        vecDir[1] = vecEyePos[1] + (500.0 * vecForward[1]);
-        vecDir[2] = vecEyePos[2] + (500.0 * vecForward[2]);
-
-        int iColour2[4];
-        iColour2[0] = 0;
-        iColour2[1] = 0;
-        iColour2[2] = 255;
-        iColour2[3] = 255;
-
-        TE_SetupBeamPoints(vecEyePos, vecDir, PrecacheModel("materials/sprites/physbeam.vmt"), PrecacheModel("materials/sprites/halo01.vmt"), 0, 15, 0.1, 1.0, 1.0, 1, 0.0, iColour2, 10);
-        TE_SendToAll();
-    }
 }

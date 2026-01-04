@@ -16,6 +16,48 @@ methodmap HeavyRobotBot < CBaseCombatCharacter
         EntityFactory = new CEntityFactory("nb_heavybot", OnCreate, OnRemove);
         EntityFactory.DeriveFromNPC();
         EntityFactory.SetInitialActionFactory(HeavyRobotBotMainAction.GetFactory());
+
+        //I know how bad it looks
+        EntityFactory.BeginDataMapDesc();
+        CNextBotFactory.DefineVisionProps(EntityFactory)
+		CNextBotFactory.DefineBodyProps(EntityFactory)
+		CNextBotFactory.DefineIntentionProps(EntityFactory)
+
+		EntityFactory
+			.DefineIntField("m_idleSequence")
+            .DefineIntField("m_runSequence")
+            .DefineFloatField("m_flNextPrimaryAttack")
+            .DefineFloatField("m_flNextSecondaryAttack")
+            .DefineFloatField("m_flWeaponIdleTime")
+            .DefineIntField("m_iWeaponState")
+            .DefineIntField("m_iMinigunSound")
+            .DefineIntField("m_iWeaponMode")
+            .DefineEntityField("m_hMuzzleEffect")
+            .DefineEntityField("m_hMyWeapon")
+            .DefineFloatField("m_flNextWalkTime")
+            .DefineFloatField("m_flFireRate")
+            .DefineFloatField("m_flNextPainSound")
+            .DefineIntField("m_iWeaponDamage")
+            .DefineIntField("m_runPrimarySequence")
+            .DefineIntField("m_standPrimarySequence")
+            .DefineIntField("m_runDeployedSequence")
+            .DefineIntField("m_standDeployedSequence")
+            .DefineIntField("m_windUpGestureSequence")
+            .DefineIntField("m_windDownGestureSequence")
+            .DefineIntField("m_moveXPoseParameter")
+            .DefineIntField("m_moveYPoseParameter")
+            .DefineEntityField("m_hForcedTarget")
+            .DefineFloatField("m_flPathTime")
+            .DefineBoolField("m_bSmallHeavy")
+            .DefineFloatField("m_flUberTimer")
+            .DefineEntityField("m_hFollowTarget")
+
+            .DefineEntityField("m_hCamera")
+		.EndDataMapDesc();
+
+        /* EntityFactory = new CEntityFactory("nb_heavybot", OnCreate, OnRemove);
+        EntityFactory.DeriveFromNPC();
+        EntityFactory.SetInitialActionFactory(HeavyRobotBotMainAction.GetFactory());
         EntityFactory.BeginDataMapDesc()
             .DefineIntField("m_idleSequence")
             .DefineIntField("m_runSequence")
@@ -73,13 +115,15 @@ methodmap HeavyRobotBot < CBaseCombatCharacter
 			.DefineIntField("m_iLookAtPriority")
 			.DefineEntityField("m_hLookAtSubject")
 
+			.DefineBoolField("m_bOverrideFaceTowards")
+
 			.DefineInputFunc("JoinSquad", InputFuncValueType_Integer, InputJoinSquad)
 
 			.DefineEntityField("m_hSquadLeader")
 			.DefineEntityField("m_hSquadRoster", 32)
 			.DefineBoolField("m_bSquadHasBrokenFormation")
 			.DefineFloatField("m_flSquadFormationError")
-        .EndDataMapDesc();
+        .EndDataMapDesc(); */
 
         EntityFactory.Install();
     }
@@ -252,6 +296,19 @@ methodmap HeavyRobotBot < CBaseCombatCharacter
 			this.SetPropFloat(Prop_Data, "m_flPathTime", val);
 		}
 	}
+
+	property bool m_bSmallHeavy
+	{
+		public get()
+		{
+			return this.GetProp(Prop_Data, "m_bSmallHeavy");
+		}
+
+		public set(bool val)
+		{
+			this.SetProp(Prop_Data, "m_bSmallHeavy", val);
+		}
+	}
 }
 
 static void InitBehaviours()
@@ -287,11 +344,18 @@ static void OnCreate(HeavyRobotBot ent)
 	SDKHook(ent.index, SDKHook_Think, Think);
 	SDKHook(ent.index, SDKHook_OnTakeDamage, OnTakeDamage);
 	SDKHook(ent.index, SDKHook_OnTakeDamageAlivePost, OnTakeDamageAlivePost);
+	SDKHook(ent.index, SDKHook_ThinkPost, ThinkPost);
 
 	CBaseNPC_Locomotion loco = npc.GetLocomotion();
 	loco.SetCallback(LocomotionCallback_ClimbUpToLedge, LocomotionClimbUpToLedge);
 	loco.SetCallback(LocomotionCallback_ShouldCollideWith, LocomotionShouldCollideWith);
 	loco.SetCallback(LocomotionCallback_IsEntityTraversable, LocomotionIsEntityTraversable);
+
+	if (ent.m_bSmallHeavy)
+	{
+		ent.SetModel("models/bots/heavy/bot_heavy.mdl");
+		ent.SetProp(Prop_Data, "m_iHealth", 300);
+	}
 }
 
 static bool LocomotionClimbUpToLedge(CBaseNPC_Locomotion loco, const float goal[3], const float fwd[3], int entity)
@@ -311,6 +375,8 @@ static bool LocomotionShouldCollideWith(CBaseNPC_Locomotion loco, CBaseEntity ot
 {
 	if (other.index > 0 && other.index <= MaxClients)
 	{
+		if (CBaseEntity(loco.GetBot().GetEntity()).GetProp(Prop_Send, "m_iTeamNum") == other.GetProp(Prop_Send, "m_iTeamNum"))
+			return false;
 		return true;
 	}
 
@@ -329,6 +395,25 @@ static bool LocomotionIsEntityTraversable(CBaseNPC_Locomotion loco, CBaseEntity 
 		//return false;
 	}
 
+	char szClassName[64];
+	obstacle.GetClassname(szClassName, sizeof(szClassName))
+	if (StrEqual(szClassName, "func_respawnroomvisualizer") && obstacle.GetProp(Prop_Data, "m_iTeamNum") != CBaseEntity(loco.GetBot().GetEntity()).GetProp(Prop_Data, "m_iTeamNum"))
+	{
+		return false;
+	}
+
+	if (StrEqual(szClassName, "func_door") || StrEqual(szClassName, "func_door_rotating") || StrEqual(szClassName, "func_brush"))
+	{
+		//Allow go throguh doors and brushes, because it will stuck nextbot otherwise
+		return true;
+	}
+
+	if (StrEqual(szClassName, "prop_dynamic"))
+	{
+		//Also allow because he's stupid and getting stuck
+		return true;
+	}
+
 	return loco.CallBaseFunction(obstacle, when);
 }
 
@@ -339,13 +424,23 @@ static void OnRemove(HeavyRobotBot ent)
 	StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunfire.wav");
 	StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunspin.wav");
 	StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_loop.wav");
+
+	StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_shoot.wav");
+	StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_spin.wav");
 }
 
 static void SpawnPost(int entIndex)
 {
 	HeavyRobotBot ent = HeavyRobotBot(entIndex);
 
-	ent.SetPropFloat(Prop_Data, "m_flModelScale", StringToFloat(BASE_MODEL_SCALE));
+	if (!ent.m_bSmallHeavy)
+		ent.SetPropFloat(Prop_Data, "m_flModelScale", StringToFloat(BASE_MODEL_SCALE));
+
+	if (ent.m_bSmallHeavy)
+	{
+		ent.SetModel("models/bots/heavy/bot_heavy.mdl");
+		ent.SetProp(Prop_Data, "m_iHealth", 300);
+	}
 
 	ent.SetProp(Prop_Data, "m_runPrimarySequence", CBaseAnimating(ent.index).LookupSequence("Run_PRIMARY"));
 	ent.SetProp(Prop_Data, "m_standPrimarySequence", CBaseAnimating(ent.index).LookupSequence("Stand_PRIMARY"));
@@ -359,7 +454,11 @@ static void SpawnPost(int entIndex)
 	ent.SetProp(Prop_Data, "m_moveXPoseParameter", ent.LookupPoseParameter("move_x"));
 	ent.SetProp(Prop_Data, "m_moveYPoseParameter", ent.LookupPoseParameter("move_y"));
 
-	ent.m_hMyWeapon = CBaseEntity(CreateWeapon(ent.index, "models/weapons/w_models/w_minigun.mdl", "head", 8, BASE_MODEL_SCALE_F));
+	float flModelScale = BASE_MODEL_SCALE_F;
+	if (ent.m_bSmallHeavy)
+		flModelScale = 1.0;
+
+	ent.m_hMyWeapon = CBaseEntity(CreateWeapon(ent.index, "models/weapons/w_models/w_minigun.mdl", "head", 8, flModelScale));
 
 	ent.SetProp(Prop_Send, "m_nSkin", ent.GetProp(Prop_Send, "m_iTeamNum") == 2 ? 0 : 1);
 
@@ -367,7 +466,12 @@ static void SpawnPost(int entIndex)
 
 	ent.SetPropFloat(Prop_Data, "m_flEyePosHeight", 72.0);
 
+	if (ent.m_bSmallHeavy)
+		ent.SetPropFloat(Prop_Data, "m_flEyePosHeight", 25.0);
+
 	float vecEyeColor[3] = { 0.0, 240.0, 255.0 };
+	if (ent.GetProp(Prop_Send, "m_iTeamNum") == 2)
+		vecEyeColor = { 255.0, 0.0, 0.0 };
 	if (ent.GetProp(Prop_Data, "m_iSkill") > BOT_SKILL_NORMAL)
 		vecEyeColor = { 255.0, 180.0, 36.0 };
 	SpawnRobotEye(ent.index, vecEyeColor, false);
@@ -378,24 +482,8 @@ static void SpawnPost(int entIndex)
 	//game/shared/tf/tf_gamerules.h - DefaultFOV()
 	CBotVision(nextBot.GetVisionInterface()).SetFieldOfViewEx(75.0);
 
-	//for (int i = 1; i <= MaxClients; i++)
-	//{
-	//	if (IsClientInGame(i) && IsPlayerAlive(i) && nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum"))
-	//	{
-	//		if (!g_CVar_spy_cloak_visible.BoolValue && !TF2_IsPlayerInCondition(i, TFCond_Cloaked) || g_CVar_spy_cloak_visible.BoolValue)
-	//			nextBot.GetVisionInterface().AddKnownEntity(i);
-	//	}
-	//}
-
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (IsClientInGame(i) && IsPlayerAlive(i) && TF2_IsPlayerInCondition(i, TFCond_Cloaked))
-		{
-			nextBot.GetVisionInterface().ForgetEntity(i);
-		}
-	}
-
-	EmitSoundToAll("mvm/giant_heavy/giant_heavy_loop.wav", ent.index, SNDCHAN_AUTO, 83, _, 0.8);
+	if (!ent.m_bSmallHeavy)
+		EmitSoundToAll("mvm/giant_heavy/giant_heavy_loop.wav", ent.index, SNDCHAN_AUTO, 83, _, 0.8);
 
 	//float vecMins[3], vecMaxs[3];
 	//ent.GetPropVector(Prop_Send, "m_vecMins", vecMins);
@@ -407,13 +495,13 @@ static void SpawnPost(int entIndex)
 
 	//It doesn't work here... why?
 	//Works only if we use SDKHook OnSpawnPost
-	float vecMins[3] = {-40.0, -40.0, 0.0};
-	float vecMaxs[3] = {40.0, 40.0, 155.0};
+	//float vecMins[3] = {-40.0, -40.0, 0.0};
+	//float vecMaxs[3] = {40.0, 40.0, 155.0};
 
-    ent.SetPropVector(Prop_Send, "m_vecMins", vecMins);
-    ent.SetPropVector(Prop_Send, "m_vecMaxs", vecMaxs);
+    //ent.SetPropVector(Prop_Send, "m_vecMins", vecMins);
+    //ent.SetPropVector(Prop_Send, "m_vecMaxs", vecMaxs);
 
-    TeleportEntity(entIndex, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+    //TeleportEntity(entIndex, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
 }
 
 static void UpdateTarget(HeavyRobotBot ent)
@@ -427,24 +515,27 @@ static void UpdateTarget(HeavyRobotBot ent)
 	{
         if (GetClientOfUserId(g_iFakeClientUserId) > 0 && GetClientOfUserId(g_iFakeClientUserId) == i)
             continue;
-		//TODO: Simplify this shit
-		if (IsClientInGame(i) && IsPlayerAlive(i) && nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum"))
+
+		if (!IsClientInGame(i) || !IsPlayerAlive(i))
+			continue;
+
+		bool bAddThreat = nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum");
+
+		if (bAddThreat)
 		{
-			//If you a hiding on a building floor, come down and fight like a man!
-			//There is AI flawn that I don't know how to fix: AI will try to reach and kill threat even if threat is not reachable
-			//Since our threat is close (< 500 hammer units) and because of IsImmediateThreat, nextbot will only target that hiding player, instead of killing another players, if both hiding threat and a reachable threat will shoot our nextbot, nextbot will stand like an idiot
-			if (g_CVar_fair_fight.BoolValue && CTFBotIntention(nextBot.GetIntentionInterface()).IsThreatOnNav(i) || !g_CVar_fair_fight.BoolValue)
-			{
-				if (g_CVar_use_fov.BoolValue && CBotVision(nextBot.GetVisionInterface()).IsInFieldOfViewTargetEx(i) || !g_CVar_use_fov.BoolValue)
-				{
-					if (!g_CVar_spy_cloak_visible.BoolValue && !TF2_IsPlayerInCondition(i, TFCond_Cloaked) || g_CVar_spy_cloak_visible.BoolValue)
-					{
-						//PrintToChatAll("%b %b | %b", !g_CVar_spy_cloak_visible.BoolValue, !TF2_IsPlayerInCondition(i, TFCond_Cloaked), g_CVar_spy_cloak_visible.BoolValue);
-						nextBot.GetVisionInterface().AddKnownEntity(i);
-					}
-				}
-			}
-			//IsClientInGame(i) && IsPlayerAlive(i) && nextBot.GetVisionInterface().IsAbleToSeeTarget(i, DISREGARD_FOV) && !IsClientFriendlyKostyl(i) && GetClientTeam(i) != ent.GetProp(Prop_Send, "m_iTeamNum") && (g_CVar_fair_fight.BoolValue && CTFBotIntention(nextBot.GetIntentionInterface()).IsThreatOnNav(i) || !g_CVar_fair_fight.BoolValue) && (g_CVar_use_fov.BoolValue && CBotVision(nextBot.GetVisionInterface()).IsInFieldOfViewEx(i) || !g_CVar_use_fov.BoolValue)
+			if (g_CVar_fair_fight.BoolValue && !CTFBotIntention(nextBot.GetIntentionInterface()).IsThreatOnNav(i))
+				bAddThreat = false;
+			if (g_CVar_use_fov.BoolValue && !CBotVision(nextBot.GetVisionInterface()).IsInFieldOfViewTargetEx(i))
+				bAddThreat = false;
+			if (!g_CVar_spy_cloak_visible.BoolValue && TF2_IsPlayerInCondition(i, TFCond_Cloaked))
+				bAddThreat = false;
+			if (!g_CVar_spy_mechanics_ignore.BoolValue && CBot.IgnoreSpy(ent.index, i))
+				bAddThreat = false;
+		}
+
+		if (bAddThreat)
+		{
+			nextBot.GetVisionInterface().AddKnownEntity(i);
 		}
 	}
 
@@ -504,9 +595,21 @@ static void Think(int entIndex)
 	UpdateTarget(ent);
 
 	if (g_CVar_aim.IntValue == 0)
+	{
 		CTFBotBody(bot.GetBodyInterface()).Upkeep();
+		if (ent.HasProp(Prop_Data, "m_bOverrideFaceTowards"))
+        {
+            ent.SetProp(Prop_Data, "m_bOverrideFaceTowards", 1);
+        }
+	}
 	else if (g_CVar_aim.IntValue == 1)
+	{
 		CBotBody(bot.GetBodyInterface()).Upkeep();
+		if (ent.HasProp(Prop_Data, "m_bOverrideFaceTowards"))
+        {
+            ent.SetProp(Prop_Data, "m_bOverrideFaceTowards", 0);
+        }
+	}
 
 	CBotBody(bot.GetBodyInterface()).UpdateBodyPitchYaw();
 	CBotBody(bot.GetBodyInterface()).UpdateAnimationXY();
@@ -524,12 +627,42 @@ static void Think(int entIndex)
 		}
 	}
 
+	CTFBotIntention(bot.GetIntentionInterface()).UpdateDelayedThreatNotices();
+
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (IsClientInGame(i) && IsPlayerAlive(i) && g_CVar_fair_fight.BoolValue && !CTFBotIntention(bot.GetIntentionInterface()).IsThreatOnNav(i))
+		if (!IsClientInGame(i) || !IsPlayerAlive(i))
+			continue;
+
+		bool bForget = false;
+		if (g_CVar_fair_fight.BoolValue && !CTFBotIntention(bot.GetIntentionInterface()).IsThreatOnNav(i))
+		{
+			bForget = true;
+		}
+		if (!g_CVar_spy_mechanics_ignore.BoolValue && CBot.IgnoreSpy(ent.index, i))
+		{
+			bForget = true;
+		}
+
+		if (bForget)
+			bot.GetVisionInterface().ForgetEntity(i);
+
+		/* if (IsClientInGame(i) && IsPlayerAlive(i) && g_CVar_fair_fight.BoolValue && !CTFBotIntention(bot.GetIntentionInterface()).IsThreatOnNav(i))
 		{
 			bot.GetVisionInterface().ForgetEntity(i);
-		}
+		} */
+	}
+
+	if (!g_CVar_spy_cloak_visible.BoolValue)
+		CBot.HandleSpyMemoryLogic(entIndex);
+
+	if (ent.GetPropFloat(Prop_Data, "m_flUberTimer") > GetGameTime())
+	{
+		ent.SetProp(Prop_Send, "m_nSkin", ent.GetProp(Prop_Send, "m_iTeamNum") == 2 ? 2 : 3);
+	}
+	else
+	{
+		ent.SetProp(Prop_Send, "m_nSkin", ent.GetProp(Prop_Send, "m_iTeamNum") == 2 ? 0 : 1);
 	}
 
 	//if (EntRefToEntIndex(g_iBossHealthbarRef) == entIndex)
@@ -552,6 +685,20 @@ static void Think(int entIndex)
 	#endif
 
 	//CBotDebug(bot).DebugLookAt();
+}
+
+//https://github.com/TF2-DMB/CBaseNPC/blob/f2af3f7b74af2d20cf5f673565cb31a887835fb8/extension/cbasenpc_internal.cpp#L157
+
+//CBaseNPC thinks every 0.06 second, this screws CTFBotBody aim speed a lot (nextbots with easy/normal/hard tracking is awful and slow because of that). So we set to think every 0.01 second
+//TODO: This affects weapon firerate and fl timers because of that. Dunno if it good or bad
+//TODO: Affects a nextbot moving speed? I think he's moving a little bit faster
+//TODO: Affects a jump height, he's jumping very high now if he's stuck
+//TODO: Check server performance with a lot of nextbots because of changed think frequency rate
+//TODO: Instead of changing think update rate, we can create timer that runs 0.01 and loop through all nextbots to call Upkeep()
+//TODO: Or we can create seperate entity that thinks every 0.01 seconds and loop through all nextbots and call Upkeep()? (dummy base_boss in 0,0,0 for example)
+static void ThinkPost(int entIndex)
+{
+	CBaseEntity(entIndex).SetNextThink(GetGameTime() + 0.01);
 }
 
 static void OnTakeDamageAlivePost(int entIndex,
@@ -640,8 +787,11 @@ static Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &dam
 	if (GetEntProp(attacker, Prop_Send, "m_iTeamNum") == GetEntProp(victim, Prop_Send, "m_iTeamNum"))
 		return Plugin_Stop;
 
-	if (CBaseEntity(victim).MyNextBotPointer().GetVisionInterface().GetKnown(attacker) == NULL_KNOWN_ENTITY)
-		CBaseEntity(victim).MyNextBotPointer().GetVisionInterface().AddKnownEntity(attacker);
+	if (GetEntPropEnt(victim, Prop_Data, "m_hForcedTarget") != -1 && GetEntPropEnt(victim, Prop_Data, "m_hForcedTarget") != attacker)
+		return Plugin_Stop;
+
+	if (GetEntPropFloat(victim, Prop_Data, "m_flUberTimer") > GetGameTime())
+		return Plugin_Stop;
 
 	if (damagecustom == TF_CUSTOM_BACKSTAB)
 	{
@@ -649,9 +799,13 @@ static Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &dam
 	}
 	else if (damagetype & DMG_CRIT && damagetype & DMG_BURN)
 	{
-		//Because of the flamethrower fire rate, it would create a lot of timers... commented for now
-		//if (CBaseEntity(victim).MyNextBotPointer().GetRangeTo(attacker) < 750)
-		//	CTFBotIntention(CBaseEntity(victim).MyNextBotPointer().GetIntentionInterface()).DelayedThreatNotice(attacker, 0.5);
+		if (CBaseEntity(victim).MyNextBotPointer().GetRangeTo(attacker) < 750)
+			CTFBotIntention(CBaseEntity(victim).MyNextBotPointer().GetIntentionInterface()).DelayedThreatNotice(attacker, 0.5);
+	}
+	else
+	{
+		if (CBaseEntity(victim).MyNextBotPointer().GetVisionInterface().GetKnown(attacker) == NULL_KNOWN_ENTITY)
+			CBaseEntity(victim).MyNextBotPointer().GetVisionInterface().AddKnownEntity(attacker);
 	}
 
 	//float flMinRange = 100.0;

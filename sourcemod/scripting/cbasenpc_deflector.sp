@@ -5,7 +5,7 @@
 #include <tf2_stocks>
 #include <tf2>
 
-#define VERSION "1.3"
+#define VERSION "1.4"
 
 public Plugin myinfo =
 {
@@ -50,6 +50,7 @@ ConVar g_CVar_fair_fight;
 ConVar g_CVar_use_fov;
 ConVar g_CVar_team_mode;
 ConVar g_CVar_spy_cloak_visible;
+ConVar g_CVar_spy_mechanics_ignore;
 
 char g_szGibs[][] =
 {
@@ -84,6 +85,31 @@ char g_szDieSounds[][] =
 	"vo/mvm/mght/heavy_mvm_m_PainSevere03.mp3",
 };
 
+char g_szSmallFootstepSounds[][] =
+{
+	"mvm/player/footsteps/robostep_01.wav",
+	"mvm/player/footsteps/robostep_02.wav",
+	"mvm/player/footsteps/robostep_03.wav",
+	"mvm/player/footsteps/robostep_04.wav",
+};
+
+char g_szSmallPainSounds[][] =
+{
+	"vo/mvm/norm/heavy_mvm_PainSevere01.mp3",
+	"vo/mvm/norm/heavy_mvm_PainSevere02.mp3",
+	"vo/mvm/norm/heavy_mvm_PainSevere03.mp3",
+};
+
+char g_szSmallDieSounds[][] =
+{
+	"vo/mvm/norm/heavy_mvm_PainSevere01.mp3",
+	"vo/mvm/norm/heavy_mvm_PainSevere02.mp3",
+	"vo/mvm/norm/heavy_mvm_PainSevere03.mp3",
+};
+
+//Put on top because bot.sp relies on gamelinux define tags
+#include "cbasenpc/nb_heavybot/gamelinux.sp"
+
 #include "cbasenpc/nb_heavybot/bot.sp"
 
 #include "cbasenpc/nb_heavybot/filters.sp"
@@ -97,6 +123,8 @@ char g_szDieSounds[][] =
 #include "cbasenpc/nb_heavybot/tfbotintention.sp"
 
 #include "cbasenpc/nb_heavybot/botvision.sp"
+
+#include "cbasenpc/nb_heavybot/botpropsfactory.sp"
 
 #include "cbasenpc/nb_heavybot.sp"
 
@@ -247,11 +275,20 @@ methodmap CTFMinigun < INextBot
 
         CBaseAnimatingOverlay(ent.index).AddGestureSequence(ent.GetProp(Prop_Data, "m_windUpGestureSequence"), 1.1, true);
 
-        EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunwindup.wav", ent.index, SNDCHAN_WEAPON, MINIGUN_SND_LEVEL, _, 0.9, 100);
-        StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunfire.wav");
-        StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunspin.wav");
-        StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunfire.wav");
-        StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunspin.wav");
+        if (ent.m_bSmallHeavy)
+        {
+            EmitSoundToAll(")weapons/minigun_wind_up.wav", ent.index, SNDCHAN_WEAPON, 94, _, 1.0, 100);
+            StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_shoot.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_spin.wav");
+        }
+        else
+        {
+            EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunwindup.wav", ent.index, SNDCHAN_WEAPON, MINIGUN_SND_LEVEL, _, 0.9, 100);
+            StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunfire.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunspin.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunfire.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunspin.wav");
+        }
 
         this.WeaponSoundUpdate();
     }
@@ -272,11 +309,20 @@ methodmap CTFMinigun < INextBot
 
         CBaseAnimatingOverlay(ent.index).AddGestureSequence(ent.GetProp(Prop_Data, "m_windDownGestureSequence"), 1.1, true);
 
-        EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunwinddown.wav", ent.index, SNDCHAN_WEAPON, MINIGUN_SND_LEVEL, _, 0.9, 100);
-        StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunfire.wav");
-        StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunspin.wav");
-        StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunfire.wav");
-        StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunspin.wav");
+        if (ent.m_bSmallHeavy)
+        {
+            EmitSoundToAll(")weapons/minigun_wind_down.wav", ent.index, SNDCHAN_WEAPON, 94, _, 1.0, 100);
+            StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_shoot.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_spin.wav");
+        }
+        else
+        {
+            EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunwinddown.wav", ent.index, SNDCHAN_WEAPON, MINIGUN_SND_LEVEL, _, 0.9, 100);
+            StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunfire.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunspin.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunfire.wav");
+            StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunspin.wav");
+        }
 
         this.WeaponSoundUpdate();
 
@@ -446,19 +492,315 @@ methodmap CTFMinigun < INextBot
 
         if (iSound == 2)
         {
-            StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunfire.wav");
-            StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunfire.wav");
-            //EmitSoundToAll("mvm/giant_heavy/giant_heavy_gunspin.wav", ent.index, SNDCHAN_AUTO, SNDLEVEL_AIRCRAFT, _, SNDVOL_NORMAL, 100);
-            EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunspin.wav", ent.index, SNDCHAN_AUTO, MINIGUN_SND_LEVEL, _, SNDVOL_NORMAL, 100);
+            if (ent.m_bSmallHeavy)
+            {
+                StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_shoot.wav");
+                EmitSoundToAll(")weapons/minigun_spin.wav", ent.index, SNDCHAN_AUTO, 94, _, SNDVOL_NORMAL, 100);
+            }
+            else
+            {
+                StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunfire.wav");
+                StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunfire.wav");
+                EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunspin.wav", ent.index, SNDCHAN_AUTO, MINIGUN_SND_LEVEL, _, SNDVOL_NORMAL, 100);
+            }
         }
         else if (iSound == 1)
         {
-            StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunspin.wav");
-            StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunspin.wav");
-            //EmitSoundToAll("mvm/giant_heavy/giant_heavy_gunfire.wav", ent.index, SNDCHAN_AUTO, SNDLEVEL_AIRCRAFT, _, SNDVOL_NORMAL, 100);
-            EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunfire.wav", ent.index, SNDCHAN_AUTO, MINIGUN_SND_LEVEL, _, SNDVOL_NORMAL, 100);
+            if (ent.m_bSmallHeavy)
+            {
+                StopSound(ent.index, SNDCHAN_AUTO, ")weapons/minigun_spin.wav");
+                EmitSoundToAll(")weapons/minigun_shoot.wav", ent.index, SNDCHAN_AUTO, 94, _, SNDVOL_NORMAL, 100);
+            }
+            else
+            {
+                StopSound(ent.index, SNDCHAN_AUTO, ")mvm/giant_heavy/giant_heavy_gunspin.wav");
+                StopSound(ent.index, SNDCHAN_AUTO, "mvm/giant_heavy/giant_heavy_gunspin.wav");
+                EmitSoundToAll(")mvm/giant_heavy/giant_heavy_gunfire.wav", ent.index, SNDCHAN_AUTO, MINIGUN_SND_LEVEL, _, SNDVOL_NORMAL, 100);
+            }
         }
     }
+}
+
+ArrayList g_arTeleporters;
+
+//New entity that spawns small heavy bots
+//TODO: Create new entity nb_heavybot_spawner instead?
+methodmap CTeleporterSpawner < CBaseEntity
+{
+    public CTeleporterSpawner(CBaseEntity ent)
+    {
+        return view_as<CTeleporterSpawner>(ent);
+    }
+
+    public void Update()
+    {
+
+    }
+
+    public static int Create(float pos[3], float rot[3], int team)
+    {
+        int iEnt = CreateEntityByName("obj_teleporter");
+        if (iEnt == -1)
+            return -1;
+
+        TeleportEntity(iEnt, pos, rot, NULL_VECTOR);
+        SetEntProp(iEnt, Prop_Send, "m_iTeamNum", team);
+        SetEntProp(iEnt, Prop_Data, "m_iTeleportType", 1);
+        SetEntProp(iEnt, Prop_Send, "m_iObjectMode", 1);
+        SetEntProp(iEnt, Prop_Send, "m_bBuilding", 1);
+        SetEntProp(iEnt, Prop_Send, "m_nSkin", team == 2 ? 0 : 1);
+        SetEntProp(iEnt, Prop_Send, "m_iHighestUpgradeLevel", 1);
+        //DispatchKeyValue(iEnt, "defaultupgrade", "0");
+        DispatchSpawn(iEnt);
+        //ActivateEntity(iEnt);
+
+        SetEntProp(iEnt, Prop_Send, "m_bBuilding", 1);
+
+        SetEntProp(iEnt, Prop_Data, "m_iMaxHealth", 425);
+        SetEntProp(iEnt, Prop_Send, "m_iHealth", 425);
+
+        DataPack pack = new DataPack();
+        pack.WriteCell(EntIndexToEntRef(iEnt));
+        pack.WriteCell(-1);
+        g_arTeleporters.Push(pack);
+
+        EmitSoundToAll(")mvm/mvm_tele_activate.wav", iEnt, SNDCHAN_AUTO, 150, _, 1.0, 100);
+        CTeleporterSpawner(CBaseEntity(iEnt)).AttachParticle();
+        SDKHook(iEnt, SDKHook_SetTransmit, Hook_TeleporterSetTransmit);
+        CreateTimer(5.0, Timer_TeleporterSpawnerSpawnLogic, EntIndexToEntRef(iEnt), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+
+        //Idk how to spawn a building in process teleporter
+        /* DataPack pack = new DataPack();
+        pack.WriteCell(EntIndexToEntRef(iEnt));
+        pack.WriteCell(-1);
+        g_arTeleporters.Push(pack);
+
+        CreateTimer(0.2, Timer_TeleporterSpawnerBuildingLogic, EntIndexToEntRef(iEnt), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); */
+
+        return iEnt;
+    }
+
+    public void Kill()
+    {
+        for (int i = 0; i < g_arTeleporters.Length; i++)
+        {
+            DataPack pack = view_as<DataPack>(g_arTeleporters.Get(i));
+            pack.Reset();
+            int iEnt = EntRefToEntIndex(pack.ReadCell());
+            int iTeleporterEffect = EntRefToEntIndex(pack.ReadCell());
+
+            if (iEnt == this.index)
+            {
+                if (iTeleporterEffect > 0)
+                {
+                    AcceptEntityInput(iTeleporterEffect, "Kill");
+                }
+                delete pack;
+                g_arTeleporters.Erase(i);
+                break;
+            }
+            else if (iEnt == -1)
+            {
+                //How this could be happen? Let's remove just in case to avoid memory leaks
+                delete pack;
+                g_arTeleporters.Erase(i);
+                i--;
+            }
+        }
+    }
+
+    public static void KillEverything(bool dontErase)
+    {
+        for (int i = 0; i < g_arTeleporters.Length; i++)
+        {
+            DataPack pack = view_as<DataPack>(g_arTeleporters.Get(i));
+            pack.Reset();
+            int iEnt = EntRefToEntIndex(pack.ReadCell());
+            int iTeleporterEffect = EntRefToEntIndex(pack.ReadCell());
+
+            if (iEnt > 0)
+                AcceptEntityInput(iEnt, "Kill");
+            if (iTeleporterEffect > 0)
+                AcceptEntityInput(iEnt, "Kill");
+
+            //If we call in it OnPluginEnd, it would call about invalid handle datapack
+            if (!dontErase)
+            {
+                delete pack;
+                g_arTeleporters.Erase(i);
+            }
+        }
+    }
+
+    public void AttachParticle()
+    {
+        int iParticle = CTeleporterSpawner.CreateParticle(this.index, "teleporter_mvm_bot_persist");
+        if (iParticle == -1)
+            return;
+
+        //CheckArray();
+
+        for (int i = 0; i < g_arTeleporters.Length; i++)
+        {
+            DataPack pack = view_as<DataPack>(g_arTeleporters.Get(i));
+            pack.Reset();
+
+            int iEnt = EntRefToEntIndex(pack.ReadCell());
+            if (iEnt == this.index)
+            {
+                delete pack;
+                g_arTeleporters.Erase(i);
+
+                pack = new DataPack();
+                pack.WriteCell(EntIndexToEntRef(iEnt));
+                pack.WriteCell(EntIndexToEntRef(iParticle));
+
+                g_arTeleporters.Push(pack);
+                break;
+            }
+        }
+    }
+
+    public static int CreateParticle(int ent, const char[] part)
+    {
+        int iParticle = CreateEntityByName("info_particle_system");
+        if (iParticle == -1)
+            return -1;
+        //char szTargetName[64];
+        float vecOrigin[3];
+        GetEntPropVector(ent, Prop_Send, "m_vecOrigin", vecOrigin);
+        TeleportEntity(iParticle, vecOrigin, NULL_VECTOR, NULL_VECTOR);
+
+        DispatchKeyValue(iParticle, "targetname", "tp_prtcl");
+        //DispatchKeyValue(iParticle, "parentname", szTargetName);
+        DispatchKeyValue(iParticle, "effect_name", part);
+        DispatchSpawn(iParticle);
+
+        //Do not parent particle to a teleporter, because somehow, it fuck up the SetTransmit hook? It switches m_iState slowy because of that
+        //SetVariantString(szTargetName);
+        //AcceptEntityInput(iParticle, "SetParent", iParticle, iParticle);
+        SetEntPropEnt(iParticle, Prop_Send, "m_hOwnerEntity", ent);
+        ActivateEntity(iParticle);
+        AcceptEntityInput(iParticle, "Start");
+        return iParticle;
+    }
+
+    //Just in case to avoid memory leaks
+    public static void CheckArray()
+    {
+        for (int i = 0; i < g_arTeleporters.Length; i++)
+        {
+            DataPack pack = view_as<DataPack>(g_arTeleporters.Get(i));
+            pack.Reset();
+
+            int iEnt = EntRefToEntIndex(pack.ReadCell());
+            if (iEnt == -1)
+            {
+                delete pack;
+                g_arTeleporters.Erase(i);
+            }
+        }
+    }
+}
+
+/* public Action Timer_TeleporterSpawnerBuildingLogic(Handle timer, int entRef)
+{
+    int iEnt = EntRefToEntIndex(entRef);
+	if (iEnt <= 0)
+		return Plugin_Stop;
+	if (!HasEntProp(iEnt, Prop_Send, "m_iState"))
+		return Plugin_Stop;
+	if (!HasEntProp(iEnt, Prop_Send, "m_flPercentageConstructed"))
+		return Plugin_Stop;
+	float flProgress = GetEntPropFloat(iEnt, Prop_Send, "m_flPercentageConstructed");
+	//PrintToChatAll("m_flPercentageConstructed %.1f", flProgress);
+	if (flProgress >= 1.0)
+	{
+		if (GetEntProp(iEnt, Prop_Send, "m_iHighestUpgradeLevel") != 3)
+		{
+			SetEntProp(iEnt, Prop_Data, "m_iMaxHealth", 432);
+			SetVariantInt(432);
+			AcceptEntityInput(iEnt, "SetHealth");
+			SetEntProp(iEnt, Prop_Send, "m_iHighestUpgradeLevel", 3);
+		}
+
+		//Built
+		EmitSoundToAll(")mvm/mvm_tele_activate.wav", iEnt, SNDCHAN_AUTO, 150, _, 1.0, 100);
+        CTeleporterSpawner(CBaseEntity(iEnt)).AttachParticle();
+        SDKHook(iEnt, SDKHook_SetTransmit, Hook_TeleporterSetTransmit);
+        CreateTimer(5.0, Timer_TeleporterSpawnerSpawnLogic, EntIndexToEntRef(iEnt), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+		return Plugin_Stop;
+	}
+	return Plugin_Continue;
+} */
+
+public Action Timer_TeleporterSpawnerSpawnLogic(Handle timer, int entRef)
+{
+    int iEnt = EntRefToEntIndex(entRef);
+    if (iEnt <= 0)
+        return Plugin_Stop;
+
+    int iNumOfBots = 0;
+
+    int iBot = -1;
+    char szName[64];
+    //TODO: individual max bots number by a teleporter? Something like teleported:entindex ?
+    while ((iBot = FindEntityByClassname(iBot, "nb_heavybot")) != INVALID_ENT_REFERENCE)
+    {
+        GetEntPropString(iBot, Prop_Data, "m_iName", szName, sizeof(szName));
+        if (StrEqual(szName, "teleported"))
+            iNumOfBots++;
+    }
+
+    //If a teleporter in red or blue team, the sapper would deactive it. But if the teleporter in a unassigned team, then it would do nothing, because there is no engineers in unassigned team to remove the sapper
+    if (GetEntProp(iEnt, Prop_Send, "m_iTeamNum") > 2 && GetEntProp(iEnt, Prop_Send, "m_bSapped"))
+        return Plugin_Continue;
+
+    if (iNumOfBots >= 22)
+        return Plugin_Continue;
+
+    float vecPos[3];
+    GetEntPropVector(iEnt, Prop_Send, "m_vecOrigin", vecPos);
+
+    HeavyRobotBot bot = view_as<HeavyRobotBot>(CreateEntityByName("nb_heavybot"));
+	if (bot.index != -1)
+	{
+        int iSkill = GetRandomInt(1, 3);
+
+        bot.Teleport(vecPos);
+		bot.SetProp(Prop_Data, "m_iSkill", iSkill);
+		bot.SetProp(Prop_Data, "m_iTeamNum", GetEntProp(iEnt, Prop_Send, "m_iTeamNum"));
+		bot.SetProp(Prop_Data, "m_bDontFearSentries", true);
+		bot.SetProp(Prop_Data, "m_bSmallHeavy", true);
+		bot.SetPropString(Prop_Data, "m_iName", "teleported");
+		bot.SetPropFloat(Prop_Data, "m_flUberTimer", GetGameTime() + 5.0);
+
+		bot.Spawn();
+	}
+
+	CreateParticle(GetEntProp(iEnt, Prop_Send, "m_iTeamNum") == 2 ? "teleported_red" : "teleported_blue", vecPos, NULL_VECTOR);
+	CreateParticle(GetEntProp(iEnt, Prop_Send, "m_iTeamNum") == 2 ? "player_sparkles_red" : "player_sparkles_blue", vecPos, NULL_VECTOR);
+
+    EmitSoundToAll(")mvm/mvm_tele_deliver.wav", iEnt, SNDCHAN_AUTO, 150, _, SNDVOL_NORMAL, 100);
+    return Plugin_Continue;
+}
+
+//From my robot engineer simulator plugin, will publish soon
+//We use SetTransmit hook to force moving animation by setting state to 2
+public Action Hook_TeleporterSetTransmit(int entity, int client)
+{
+	//if (GetEntPropFloat(entity, Prop_Send, "m_flPercentageConstructed") >= 1.0)
+	//{
+		int iPreviousState = GetEntProp(entity, Prop_Send, "m_iState");
+		if (iPreviousState == 1)
+			SetEntProp(entity, Prop_Send, "m_iState", 2);
+
+		SetVariantString("running");
+		AcceptEntityInput(entity, "SetAnimation");
+		SetVariantString("running");
+		AcceptEntityInput(entity, "SetDefaultAnimation");
+	//}
+	return Plugin_Continue;
 }
 
 public void OnPluginStart()
@@ -469,17 +811,23 @@ public void OnPluginStart()
     g_CVar_aim = CreateConVar("sm_nextbot_deflector_aim", "1", "0 - Use TFBot aim system. 1 - Use same system as TFBot, but a little different");
     g_CVar_killfeed = CreateConVar("sm_nextbot_deflector_killfeed", "1", "Should the Deflector's kills/deaths be listed in the killfeed?");
     g_CVar_fair_fight = CreateConVar("sm_nextbot_deflector_fair_fight", "0", "If set, AI will ignore players who are in places where there is no navmesh to prevent AI abuse, and these players cant damage the Deflector nextbot, more info on a plugin page");
-    g_CVar_use_fov = CreateConVar("sm_nextbot_deflector_use_fov", "0", "If set, NextBot will use FOV system to detect his threats");
+    g_CVar_use_fov = CreateConVar("sm_nextbot_deflector_use_fov", "1", "If set, NextBot will use FOV system to detect his threats");
     g_CVar_team_mode = CreateConVar("sm_nextbot_deflector_team_mode", "0", "For sm_nextbot_deflector_killfeed, 0 - fake client spawned in unassigned team and can be switched to another team; 1 - fake client always will be in unassigned team; 2 - fake client will change team depends on nextbot team");
-    g_CVar_spy_cloak_visible = CreateConVar("sm_nextbot_deflecto_spy_cloak_visible", "0", "If set, NextBot will always target invisible spies");
+    g_CVar_spy_cloak_visible = CreateConVar("sm_nextbot_deflector_spy_cloak_visible", "0", "If set, NextBot will always target invisible spies");
+    g_CVar_spy_mechanics_ignore = CreateConVar("sm_nextbot_deflector_spy_mechanics_ignore", "0", "If set, NextBot will ignore spy mechanics (disguise and invisiblity)");
 
     HookConVarChange(g_CVar_team_mode, OnCVarChanged_team_mode);
+    HookConVarChange(g_CVar_aim, OnCVarChanged_aim);
 
     char szValue[8];
     g_CVar_team_mode.GetString(szValue, sizeof(szValue));
     OnCVarChanged_team_mode(g_CVar_team_mode, szValue, szValue);
+    g_CVar_aim.GetString(szValue, sizeof(szValue));
+    OnCVarChanged_aim(g_CVar_aim, szValue, szValue);
 
     RegAdminCmd("sm_deflectorbot", Cmd_Test, ADMFLAG_RCON, "Spawn a nextbot deflector heavy");
+    RegAdminCmd("sm_smalldeflectorbot", Cmd_Test2, ADMFLAG_RCON, "Spawn a nextbot deflector heavy junior");
+    RegAdminCmd("sm_deflectorbot_spawner", Cmd_Test3, ADMFLAG_RCON, "Spawn a deflector spawner");
 
     HookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
     HookEvent("post_inventory_application", Event_PlayerSpawn);
@@ -491,6 +839,18 @@ public void OnPluginStart()
 #endif
 
     g_szFakeClientName = "Giant Deflector Heavy";
+
+    CBotConfig.AddSpyMemorySupport();
+    g_bSpyDisguiseEnabled = true;
+    CBotConfig.AddSpyBackstabSupport();
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsClientInGame(i))
+            OnClientPostAdminCheck(i);
+    }
+
+    g_arTeleporters = new ArrayList();
 }
 
 public void OnMapStart()
@@ -506,6 +866,15 @@ public void OnMapStart()
 	PrecacheSound("mvm/giant_heavy/giant_heavy_loop.wav");
 	PrecacheSound("mvm/sentrybuster/mvm_sentrybuster_explode.wav");
 	PrecacheSound("weapons/halloween_boss/knight_axe_miss.wav");
+
+	PrecacheModel("models/bots/heavy/bot_heavy.mdl");
+	PrecacheSound(")weapons/minigun_shoot.wav");
+	PrecacheSound(")weapons/minigun_spin.wav");
+	PrecacheSound(")weapons/minigun_wind_down.wav");
+	PrecacheSound(")weapons/minigun_wind_up.wav");
+
+	PrecacheSound(")mvm/mvm_tele_deliver.wav");
+	PrecacheSound(")mvm/mvm_tele_activate.wav");
 
 	for (int i = 0; i < sizeof(g_szGibs); i++)
 	{
@@ -524,19 +893,31 @@ public void OnMapStart()
 	{
 		PrecacheSound(g_szDieSounds[i]);
 	}
+
+	for (int i = 0; i < sizeof(g_szPainSounds); i++)
+	{
+		PrecacheSound(g_szSmallPainSounds[i]);
+	}
+	for (int i = 0; i < sizeof(g_szFootstepSounds); i++)
+	{
+		PrecacheSound(g_szSmallFootstepSounds[i]);
+	}
+	for (int i = 0; i < sizeof(g_szDieSounds); i++)
+	{
+		PrecacheSound(g_szSmallDieSounds[i]);
+	}
 }
 
 public void OnEntityCreated(int entity, const char[] className)
 {
-    if (!g_CVar_killfeed.BoolValue)
-        return;
 	if (StrEqual(className, "nb_heavybot"))
 	{
-		CBot.AddFakeClient();
+        if (g_CVar_killfeed.BoolValue)
+            CBot.AddFakeClient();
 
-		CBot.FixHitbox(entity);
-		CBot.AddSniperHeadshotSupport(entity);
-		CBot.AddSpyBackstabSupport(entity);
+        CBot.FixHitbox(entity);
+		CBot.AddHookSniperHeadshot(entity);
+		CBot.AddHookSpyBackstab(entity);
 	}
 }
 
@@ -559,6 +940,9 @@ public void OnEntityDestroyed(int entity)
         StopSound(entity, SNDCHAN_STATIC, "mvm/giant_heavy/giant_heavy_gunfire.wav");
         StopSound(entity, SNDCHAN_STATIC, "mvm/giant_heavy/giant_heavy_gunspin.wav");
 
+        StopSound(entity, SNDCHAN_AUTO, ")weapons/minigun_shoot.wav");
+        StopSound(entity, SNDCHAN_AUTO, ")weapons/minigun_spin.wav");
+
 		int iNum = 0;
 		int iEnt = -1;
 		while ((iEnt = FindEntityByClassname(iEnt, "nb_heavybot")) != INVALID_ENT_REFERENCE)
@@ -575,6 +959,11 @@ public void OnEntityDestroyed(int entity)
 		//{
         //    CBotBossHealthbar.UpdateBossHealth();
 		//}
+	}
+
+	if (StrEqual(szName, "obj_teleporter"))
+	{
+        CTeleporterSpawner(CBaseEntity(entity)).Kill();
 	}
 }
 
@@ -597,16 +986,33 @@ public Action Timer_CheckForSure(Handle timer, int fignya)
 public void OnMapEnd()
 {
 	CBot.RemoveFakeClient();
+
+	CTeleporterSpawner.KillEverything(false);
 }
 
 public void OnPluginEnd()
 {
 	CBot.RemoveFakeClient();
+
+	CTeleporterSpawner.KillEverything(true);
+}
+
+public void OnClientPostAdminCheck(int client)
+{
+    #if defined GAME_LINUX_LOADED
+    CGameLinux.ClearPlayer(client);
+    CGameLinux.CheckPlayerPlatform(client);
+    #endif
 }
 
 public void OnCVarChanged_team_mode(ConVar convar, const char[] oldValue, const char[] newValue)
 {
     g_iFakeClientTeamMode = StringToInt(newValue);
+}
+
+public void OnCVarChanged_aim(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+
 }
 
 public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
@@ -624,7 +1030,24 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 			if (iEnt == iInflictor)
 			{
                 g_szFakeClientName = "Giant Deflector Heavy";
-                CBot.EventPlayerDeath(event, "minigun", TF_DEATHFLAG_MINIBOSS|TF_DEATHFLAG_AUSTRALIUM);
+
+                HeavyRobotBot bot = HeavyRobotBot(iEnt);
+
+                if (bot.m_bSmallHeavy)
+                    g_szFakeClientName = "Deflector Heavy";
+
+                int iDeathFlags = 0;
+                if (bot.m_hMyWeapon.index != -1 && bot.m_hMyWeapon.GetProp(Prop_Send, "m_nSkin") == 8)
+                    iDeathFlags |= TF_DEATHFLAG_AUSTRALIUM;
+
+                if (!bot.m_bSmallHeavy)
+                    iDeathFlags |= TF_DEATHFLAG_MINIBOSS;
+
+                int iCrit = 0;
+                if (EntRefToEntIndex(g_iBossHealthbarTargetRef) == iEnt)
+                    iCrit = 2;
+
+                CBot.EventPlayerDeath(event, "minigun", iDeathFlags, iCrit);
 			}
 		}
 	}
@@ -661,6 +1084,10 @@ public void Event_NpcHurt(Event event, const char[] name, bool dontBroadcast)
         if (StrEqual(szClassName, NEXTBOT_CUSTOM_CLASS_NAME) && iAttacker > 0 && iAttacker <= MaxClients)
         {
             g_szFakeClientName = "Giant Deflector Heavy";
+
+            if (GetEntProp(iEnt, Prop_Data, "m_bSmallHeavy"))
+                g_szFakeClientName = "Deflector Heavy";
+
             CBot.EventNPCHurt(event);
         }
     }
@@ -687,6 +1114,11 @@ public Action TF2_CalcIsAttackCritical(int client, int weapon, char[] weaponname
 	CTFBotIntention.OnClientWeaponFired(client, weapon);
 
 	CBot.HandleBackstabLogic(client, weapon);
+}
+
+public void TF2_OnConditionAdded(int client, TFCond condition)
+{
+    CBot.HandleOnConditionAdded(client, condition);
 }
 
 bool IsClientFriendlyKostyl(int client)
@@ -852,7 +1284,7 @@ stock void CreateParticleEx(char[] particle, float pos[3], float ang[3], int ent
 	TE_WriteVector("m_vecAngles", ang);
 	TE_WriteNum("m_iParticleSystemIndex", stridx);
 	TE_WriteNum("entindex", ent);
-	TE_WriteNum("m_iAttachType", attachType);	//Dont associate with any entity
+	TE_WriteNum("m_iAttachType", attachType);
 	TE_WriteNum("m_iAttachmentPointIndex", attachment);
 	TE_SendToAll();
 }
@@ -880,6 +1312,14 @@ stock int SpawnRobotEye(int client, float eyeColor[3], bool isLeft)
 	szEye1 = "eye_boss_1";
 	szEye2 = "eye_boss_2";
 
+	char szModel[256];
+	GetEntPropString(client, Prop_Data, "m_ModelName", szModel, sizeof(szModel));
+	if (StrContains(szModel, "bot_heavy.mdl") != -1)
+	{
+        szEye1 = "eye_1";
+        szEye2 = "eye_2";
+	}
+
 	SetVariantString(isLeft ? szEye1 : szEye2);
 	AcceptEntityInput(iGlow, "SetParentAttachment");
 
@@ -899,14 +1339,15 @@ public Action Cmd_Test(int client, int args)
 {
     if (args < 1)
     {
-        ReplyToCommand(client, "Usage: sm_deflectorbot <blue;blu/red/gray;grey;none;neutral> [health] [display health bar]");
+        ReplyToCommand(client, "Usage: sm_deflectorbot <blue;blu/red/gray;grey;none;neutral> [health] [display health bar 1/0] [custom boss name]");
         return Plugin_Handled;
     }
 
-    char szArg[64], szArg2[64], szArg3[8];
+    char szArg[64], szArg2[64], szArg3[8], szArg4[64];
 	GetCmdArg(1, szArg, sizeof(szArg));
 	GetCmdArg(2, szArg2, sizeof(szArg2));
 	GetCmdArg(3, szArg3, sizeof(szArg3));
+	GetCmdArg(4, szArg4, sizeof(szArg4));
 
 	int iHealth = 0;
 	int iTeamNum = 0;
@@ -987,12 +1428,159 @@ public Action Cmd_Test(int client, int args)
 
 		if (StringToInt(szArg3) > 0)
 		{
+            g_szFakeClientName = "Giant Deflector Heavy";
+
+            if (szArg4[0] != '\0')
+                Format(g_szFakeClientName, sizeof(g_szFakeClientName), "%s", szArg4);
+
             CBotBossHealthbar.SetBossName(g_szFakeClientName);
             CBotBossHealthbar.SetBoss(bot.index);
             //g_iBossHealthbarTargetRef = EntIndexToEntRef(bot.index);
             //CBotBossHealthbar.UpdateBossHealth();
 		}
 	}
+	return Plugin_Handled;
+}
+
+public Action Cmd_Test2(int client, int args)
+{
+    if (args < 1)
+    {
+        ReplyToCommand(client, "Usage: sm_smalldeflectorbot <blue;blu/red/gray;grey;none;neutral> [health] [skill level:easy/normal/hard/expert]");
+        return Plugin_Handled;
+    }
+
+    char szArg[64], szArg2[64], szArg3[8];
+	GetCmdArg(1, szArg, sizeof(szArg));
+	GetCmdArg(2, szArg2, sizeof(szArg2));
+	GetCmdArg(3, szArg3, sizeof(szArg3));
+
+	int iHealth = 0;
+	int iTeamNum = 0;
+
+    if (StrEqual(szArg, "red", false))
+    {
+        iTeamNum = 2;
+    }
+    else if (StrEqual(szArg, "blu", false) || StrEqual(szArg, "blue", false))
+    {
+        iTeamNum = 3;
+    }
+    else if (StrEqual(szArg, "gray", false) || StrEqual(szArg, "none", false) || StrEqual(szArg, "grey", false) || StrEqual(szArg, "neutral", false))
+    {
+        iTeamNum = 0;
+    }
+    else
+    {
+        ReplyToCommand(client, "Unknown team \"%s\"", szArg);
+        return Plugin_Handled;
+    }
+
+    if (szArg2[0] != '\0')
+        iHealth = StringToInt(szArg2);
+
+	HeavyRobotBot bot = view_as<HeavyRobotBot>(CreateEntityByName("nb_heavybot"));
+	if (bot.index != -1)
+	{
+        float vecPos[3], vecEyePos[3], angEyes[3];
+
+        GetClientEyeAngles(client, angEyes);
+        GetClientEyePosition(client, vecEyePos);
+
+        Handle hTrace = TR_TraceRayFilterEx(vecEyePos, angEyes, MASK_ALL, RayType_Infinite, Filter_WorldOnly, client);
+        if (TR_DidHit(hTrace))
+        {
+            TR_GetEndPosition(vecPos, hTrace);
+        }
+        delete hTrace;
+
+        int iSkill = 1;
+        if (szArg3[0] != '\0')
+        {
+            if (StrEqual(szArg3, "easy"))
+                iSkill = 0;
+            else if (StrEqual(szArg3, "normal"))
+                iSkill = 1;
+            else if (StrEqual(szArg3, "hard"))
+                iSkill = 2;
+            else if (StrEqual(szArg3, "expert"))
+                iSkill = 3;
+        }
+
+        bot.Teleport(vecPos);
+		bot.SetProp(Prop_Data, "m_iSkill", iSkill);
+		bot.SetProp(Prop_Data, "m_iTeamNum", iTeamNum);
+		bot.SetProp(Prop_Data, "m_bDontFearSentries", true);
+		bot.SetProp(Prop_Data, "m_bSmallHeavy", true);
+
+		if (iHealth > 0)
+		{
+            bot.SetProp(Prop_Data, "m_iHealth", iHealth);
+        }
+
+		bot.Spawn();
+
+		ReplyToCommand(client, "Spawned a Deflector Heavy %i", bot.index);
+	}
+	return Plugin_Handled;
+}
+
+public Action Cmd_Test3(int client, int args)
+{
+    if (args < 1)
+    {
+        ReplyToCommand(client, "Usage: sm_deflectorbot_spawner <blue;blu/red/gray;grey;none;neutral> [health]");
+        return Plugin_Handled;
+    }
+
+    char szArg[64], szArg2[64];
+	GetCmdArg(1, szArg, sizeof(szArg));
+	GetCmdArg(2, szArg2, sizeof(szArg2));
+
+	int iHealth = 0;
+	int iTeamNum = 0;
+
+    if (StrEqual(szArg, "red", false))
+    {
+        iTeamNum = 2;
+    }
+    else if (StrEqual(szArg, "blu", false) || StrEqual(szArg, "blue", false))
+    {
+        iTeamNum = 3;
+    }
+    else if (StrEqual(szArg, "gray", false) || StrEqual(szArg, "none", false) || StrEqual(szArg, "grey", false) || StrEqual(szArg, "neutral", false))
+    {
+        iTeamNum = 0;
+    }
+    else
+    {
+        ReplyToCommand(client, "Unknown team \"%s\"", szArg);
+        return Plugin_Handled;
+    }
+
+    if (szArg2[0] != '\0')
+        iHealth = StringToInt(szArg2);
+
+    float vecPos[3], vecEyePos[3], angEyes[3];
+
+    GetClientEyeAngles(client, angEyes);
+    GetClientEyePosition(client, vecEyePos);
+
+    Handle hTrace = TR_TraceRayFilterEx(vecEyePos, angEyes, MASK_ALL, RayType_Infinite, Filter_WorldOnly, client);
+    if (TR_DidHit(hTrace))
+    {
+        TR_GetEndPosition(vecPos, hTrace);
+    }
+    delete hTrace;
+
+    int iEnt = CTeleporterSpawner.Create(vecPos, NULL_VECTOR, iTeamNum);
+
+    if (iEnt != -1)
+    {
+        //SetEntProp()
+    }
+
+	ReplyToCommand(client, "Spawned a Deflector spawner %i", iEnt);
 	return Plugin_Handled;
 }
 

@@ -105,14 +105,14 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 
 		float flDist = GetVectorDistance(vecTargetPos, vecPos);
 
-		loco.FaceTowards(vecTargetPos);
+		if (actor.HasProp(Prop_Data, "m_bOverrideFaceTowards") && !actor.GetProp(Prop_Data, "m_bOverrideFaceTowards") || !actor.HasProp(Prop_Data, "m_bOverrideFaceTowards"))
+			loco.FaceTowards(vecTargetPos);
 
 		//TODO: IsAbleToSeeTarget and IsLineOfSightClearToEntity doesn't take in account that we have large model
-		bool bSeeTarget = bot.GetVisionInterface().IsAbleToSeeTarget(hTarget.index, DISREGARD_FOV) && bot.GetVisionInterface().IsLineOfSightClearToEntity(hTarget.index);
+		//bool bSeeTarget = bot.GetVisionInterface().IsAbleToSeeTarget(hTarget.index, DISREGARD_FOV) && bot.GetVisionInterface().IsLineOfSightClearToEntity(hTarget.index);
+		bool bSeeTarget = CBotBody(bot.GetBodyInterface()).IsAbleToSeeTarget(hTarget.index, NULL_VECTOR);
 		bool bCanShoot = flDist < 1300.0;
 		bool bShouldMoveToTarget = !bSeeTarget || flDist > 900.0;
-
-		//PrintCenterTextAll("IsAbleToSeeTarget %b IsLineOfSightClearToEntity %b IsAbleToSee %b Aimed %b", bot.GetVisionInterface().IsAbleToSeeTarget(hTarget.index, DISREGARD_FOV), bot.GetVisionInterface().IsLineOfSightClearToEntity(hTarget.index), CBotBody(bot.GetBodyInterface()).IsAbleToSeeTarget(hKnownEntity.GetEntity()), CBotBody(bot.GetBodyInterface()).IsHeadAimingOnTarget());
 
 		//TODO: Get rid of bSeeTarget because we actually use our custom IsAbleToSeeTarget?
 		if (g_CVar_aim.IntValue == 1 && !CBotBody(bot.GetBodyInterface()).IsAbleToSeeTarget(iThreatEnt))
@@ -123,11 +123,16 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 
 		if (g_CVar_aim.IntValue == 0)
 		{
-			CTFBotBody(bot.GetBodyInterface()).AimHeadTowards(iThreatEnt, LOOKAT_CRITICAL, 1.0, "Aiming at a visible threat");
+			CTFBotBody(bot.GetBodyInterface()).AimHeadTowardsTarget(iThreatEnt, LOOKAT_CRITICAL, 1.0, "Aiming at a visible threat");
 		}
 		else if (g_CVar_aim.IntValue == 1)
 		{
-			CBotBody(bot.GetBodyInterface()).AimHeadTowards(iThreatEnt, LOOKAT_CRITICAL, 1.0);
+			CBotBody(bot.GetBodyInterface()).AimHeadTowardsTarget(iThreatEnt, LOOKAT_CRITICAL, 1.0);
+		}
+
+		if (actor.GetPropEnt(Prop_Data, "m_hFollowTarget") != -1)
+		{
+			bShouldMoveToTarget = true;
 		}
 
 		if (bShouldMoveToTarget)
@@ -140,8 +145,20 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 			{
 				if (GetGameTime() > actor.m_flPathTime)
 				{
-					path2.ComputeToPos(bot, vecTargetPos);
-					actor.m_flPathTime = GetGameTime() + 0.2;
+					if (actor.GetPropEnt(Prop_Data, "m_hFollowTarget") != -1)
+					{
+						GetEntPropVector(actor.GetPropEnt(Prop_Data, "m_hFollowTarget"), Prop_Send, "m_vecOrigin", vecTargetPos);
+						if (GetVectorDistance(vecTargetPos, vecPos) > 200.0)
+						{
+							path2.ComputeToPos(bot, vecTargetPos);
+							actor.m_flPathTime = GetGameTime() + 0.2;
+						}
+					}
+					else
+					{
+						path2.ComputeToPos(bot, vecTargetPos);
+						actor.m_flPathTime = GetGameTime() + 0.2;
+					}
 				}
 				path2.Update(bot);
 				loco.Run();
@@ -154,14 +171,6 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 			//	path.Update(bot, hTarget.index);
 			//}
 		}
-		else
-		{
-			//if (bShouldMoveAround)
-			//{
-			//}
-		}
-
-		//PrintCenterTextAll("bSeeTarget %b bCanShoot %b IsHeadAimingOnTarget %b", bSeeTarget, bCanShoot, CBotBody(bot.GetBodyInterface()).IsHeadAimingOnTarget());
 
 
 		if (bSeeTarget && bCanShoot)
@@ -235,7 +244,14 @@ static int Update(HeavyRobotBotMainAction action, HeavyRobotBot actor, float int
 
 			if (GetGameTime() > actor.m_flNextWalkTime)
 			{
-				EmitSoundToAll(g_szFootstepSounds[GetRandomInt(0, sizeof(g_szFootstepSounds) - 1)], actor.index, SNDCHAN_AUTO, 95, _, 1.0);
+				if (actor.m_bSmallHeavy)
+				{
+					EmitSoundToAll(g_szSmallFootstepSounds[GetRandomInt(0, sizeof(g_szSmallFootstepSounds) - 1)], actor.index, SNDCHAN_AUTO, 87, _, 0.35, GetRandomInt(95, 100));
+				}
+				else
+				{
+					EmitSoundToAll(g_szFootstepSounds[GetRandomInt(0, sizeof(g_szFootstepSounds) - 1)], actor.index, SNDCHAN_AUTO, 95, _, 1.0);
+				}
 				actor.m_flNextWalkTime = GetGameTime() + FOOTSTEPS_COOLDOWN;
 			}
 		}
